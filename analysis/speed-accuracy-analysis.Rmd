@@ -1254,10 +1254,15 @@ fixna <- function(col){
   return(column)
 }
 
-timecourse <- merge(idata, df, by = c("Sub.Num", "Tr.Num")) %>%
+idata <- merge(idata, df, by = c("Sub.Num", "Tr.Num")) %>%
   mutate_each(funs(fixna), 10:100)
+```
 
-timecourse <- timecourse %>%
+Actually making the timecourse plot!
+```{r}
+# arranging data
+
+timecourse <- idata %>%
   filter(age_code.x == "child", stimuli.x == "ASL", is.na(RT.y) == F) %>%
   group_by(correct) %>%
   summarise_each(funs(mean(., na.rm = T)), 10:100) %>%
@@ -1266,10 +1271,40 @@ timecourse <- data.frame(timecourse[2:92,])
 colnames(timecourse) <- c(0, 1)
 names <- rownames(timecourse)
 timecourse$time <- as.numeric(names)
-```
 
-Actually making the timecourse plot!
-```{r}
 plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = timecourse[, 1], color = "incorrect")) + geom_line(aes(y = timecourse[, 2], color = "correct")) + scale_y_continuous(name = "Fixation")
 plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
+```
+
+
+## Scatterplot of RT vs dweltime of incorrect ASL and spoken responses
+
+```{r}
+
+# calculating dwel times for each child
+
+dweltime <- idata %>%
+  filter(age_code.x == "child", is.na(RT.y) == F, correct == 0) %>%
+
+dweltime <- mutate(dweltime, dwel = numeric(nrow(dweltime)))
+
+for(rownum in 1:nrow(dweltime)){
+  dweltime[rownum, "dwel"] <- 0
+  for(colnum in 10:100){
+    ifelse(dweltime[rownum, colnum] == 0,
+           ifelse(dweltime[rownum, "dwel"] > 0,
+                  dweltime[rownum, "dwel"] <- dweltime[rownum, "dwel"],
+                  dweltime[rownum, "dwel"] <-
+                    as.numeric(colnames(dweltime)[colnum])),
+           ifelse(dweltime[rownum, "dwel"] > 0,
+                  dweltime[rownum, "dwel"] <-
+                    as.numeric(colnames(dweltime)[colnum]) - dweltime[rownum, "dwel"],
+                  dweltime[rownum, "dwel"] <- dweltime[rownum, "dwel"]))
+  }
+}
+
+# graphing! Scatterplot with lines of best fit
+fitASL <- lm(dwel ~ RT.y, data = filter(dweltime, language_modality.x == "ASL"))
+fitEng <- (lm(dwel ~ RT.y, data = filter(dweltime, language_modality.x == "English")))
+ggplot(dweltime, aes(x = RT.y, y = dwel, color = language_modality.x)) + geom_point() + geom_abline(intercept = fitASL$coefficients["(Intercept)"], slope = fitASL$coefficients["RT.y"], color = "red") + geom_abline(intercept = fitEng$coefficients["(Intercept)"], slope = fitEng$coefficients["RT.y"], color = "blue")
 ```

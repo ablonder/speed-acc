@@ -1039,6 +1039,11 @@ ewma_data <- df %>%
 overallcut <- # comment out to show graph instead
   ewma(ewma_data)/1000 # also the division
 
+ASLFace_ewma <- filter(ewma_data, stimuli == "ASL" || stimuli == "Face")
+ASLFacecut <-
+  ewma(ASLFace_ewma)/1000
+## TODO - run DDM with ASLFacecut filter
+
 ASL_ewma <- filter(ewma_data, stimuli == "ASL")
 ASLcut <-
   ewma(ASL_ewma)/1000
@@ -1054,8 +1059,6 @@ Objcut <-
 Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
 Bullcut <-
   ewma(Bull_ewma)/1000
-  
-## TODO - scatterplot of RT vs dweltime on incorrect in ASL vs spoken
 ```
 
 Average accuracy for all conditions past cutoff
@@ -1238,7 +1241,7 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
 
 ## Comparing accurate versus inaccurate ASL signers
 
-Load reaction time data and merge with eyemovement data
+Load reaction time data
 ```{r}
 idata <- read.csv("data/3_final_merged_data/speed-acc-cleaned-iChart.csv", check.names=F, stringsAsFactors=F)
 
@@ -1254,57 +1257,73 @@ fixna <- function(col){
   return(column)
 }
 
-idata <- merge(idata, df, by = c("Sub.Num", "Tr.Num")) %>%
-  mutate_each(funs(fixna), 10:100)
+idata <- mutate_each(idata, funs(fixna), 10:100)
 ```
 
-Actually making the timecourse plot!
+Timecourse plot!
 ```{r}
 # arranging data
 
 timecourse <- idata %>%
-  filter(age_code.x == "child", stimuli.x == "ASL", is.na(RT.y) == F) %>%
-  group_by(correct) %>%
+  filter(age_code == "child", stimuli == "ASL", trial_type != "no_shift") %>%
+  group_by(trial_type) %>%
   summarise_each(funs(mean(., na.rm = T)), 10:100) %>%
   t()
-timecourse <- data.frame(timecourse[2:92,])
-colnames(timecourse) <- c(0, 1)
+
+colnames(timecourse) <- timecourse[1,]
+timecourse <- timecourse[2:92,]
+C_D <- timecourse[, 1]
+C_T <- timecourse[, 2]
+off_center <- timecourse[, 3]
+timecourse <- data.frame(timecourse)
+
 names <- rownames(timecourse)
 timecourse$time <- as.numeric(names)
+timecourse$C_D <- as.numeric(C_D)
+timecourse$C_T <- as.numeric(C_T)
+timecourse$off_center <- as.numeric(off_center)
 
-plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = timecourse[, 1], color = "incorrect")) + geom_line(aes(y = timecourse[, 2], color = "correct")) + scale_y_continuous(name = "Fixation")
+plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center"))
 plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
+
+## TODO - separate graphs for correct and incorrect with separate lines for target, distractor, and center (see speed-acc-profile-plots)
+## TODO - just include target and distractor, not center for ASL and Face
+## TODO - calculate area between correct and incorrect after incorrect crosses .5 for all conditions (see Yurovsky Social Reference) - make curves first
 ```
 
 
-## Scatterplot of RT vs dweltime of incorrect ASL and spoken responses
+## Scatterplot of RT vs dweltime of incorrect ASL and English responses
 
 ```{r}
 
 # calculating dwel times for each child
 
 dweltime <- idata %>%
-  filter(age_code.x == "child", is.na(RT.y) == F, correct == 0) %>%
+  filter(age_code == "child", trial_type == "C_D", is.na(RT) == F)
+
 
 dweltime <- mutate(dweltime, dwel = numeric(nrow(dweltime)))
 
 for(rownum in 1:nrow(dweltime)){
   dweltime[rownum, "dwel"] <- 0
   for(colnum in 10:100){
-    ifelse(dweltime[rownum, colnum] == 0,
-           ifelse(dweltime[rownum, "dwel"] > 0,
-                  dweltime[rownum, "dwel"] <- dweltime[rownum, "dwel"],
-                  dweltime[rownum, "dwel"] <-
-                    as.numeric(colnames(dweltime)[colnum])),
-           ifelse(dweltime[rownum, "dwel"] > 0,
-                  dweltime[rownum, "dwel"] <-
-                    as.numeric(colnames(dweltime)[colnum]) - dweltime[rownum, "dwel"],
-                  dweltime[rownum, "dwel"] <- dweltime[rownum, "dwel"]))
+    if(dweltime[rownum, "dwel"] == 0 &&
+       as.numeric(colnames(dweltime)[colnum]) > dweltime[rownum, "RT"] &&
+       is.na(dweltime[rownum, colnum]) == F &&
+        dweltime[rownum, colnum] > 0){
+      dweltime[rownum, "dwel"] <- as.numeric(colnames(dweltime)[colnum]) - dweltime[rownum, "RT"]
+      break
+    }
+  }
+  if(dweltime[rownum, "dwel"] == 0){
+    dweltime[rownum, "dwel"] <- 3000 - dweltime[rownum, "RT"]
   }
 }
 
+
 # graphing! Scatterplot with lines of best fit
-fitASL <- lm(dwel ~ RT.y, data = filter(dweltime, language_modality.x == "ASL"))
-fitEng <- (lm(dwel ~ RT.y, data = filter(dweltime, language_modality.x == "English")))
-ggplot(dweltime, aes(x = RT.y, y = dwel, color = language_modality.x)) + geom_point() + geom_abline(intercept = fitASL$coefficients["(Intercept)"], slope = fitASL$coefficients["RT.y"], color = "red") + geom_abline(intercept = fitEng$coefficients["(Intercept)"], slope = fitEng$coefficients["RT.y"], color = "blue")
+
+fitASL <- lm(dwel ~ RT, data = filter(dweltime, language_modality == "ASL"))
+fitEng <- (lm(dwel ~ RT, data = filter(dweltime, language_modality == "English")))
+ggplot(dweltime, aes(x = RT, y = dwel, color = language_modality)) + geom_point() + geom_abline(intercept = fitASL$coefficients["(Intercept)"], slope = fitASL$coefficients["RT"], color = "red") + geom_abline(intercept = fitEng$coefficients["(Intercept)"], slope = fitEng$coefficients["RT"], color = "blue")
 ```

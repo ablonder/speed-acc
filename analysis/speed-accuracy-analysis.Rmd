@@ -1019,10 +1019,11 @@ ewma <- function(data){
       cutoff <- rt
   }
   
-  ggplot(ewma_results, aes(rt)) +
-    geom_line(aes(y = cs, color = "cs")) +
-    geom_line(aes(y = ucl, color = "UCL")) +
-    geom_vline(aes(xintercept = cutoff), linetype = 2)
+  # uncomment to show graph
+  # ggplot(ewma_results, aes(rt)) +
+  #   geom_line(aes(y = cs, color = "cs")) +
+  #   geom_line(aes(y = ucl, color = "UCL")) +
+  #   geom_vline(aes(xintercept = cutoff), linetype = 2)
   
   return(cutoff) # comment out to show graph instead
 }
@@ -1042,7 +1043,6 @@ overallcut <- # comment out to show graph instead
 ASLFace_ewma <- filter(ewma_data, stimuli == "ASL" || stimuli == "Face")
 ASLFacecut <-
   ewma(ASLFace_ewma)/1000
-## TODO - run DDM with ASLFacecut filter
 
 ASL_ewma <- filter(ewma_data, stimuli == "ASL")
 ASLcut <-
@@ -1090,7 +1090,7 @@ filteredavgs_all <- df %>%
 
 ## Off the shelf DDM Filtered based on EWMA
 
-Just ASL and Face conditions
+Just ASL and Face conditions by their respective cutoffs
 ```{r estpars}
 dfiltered <- filter(d, (stimuli == "ASL" & q >= ASLcut)
                     | (stimuli == "Face" & q >= Facecut))
@@ -1159,6 +1159,89 @@ filteredpars.ms$language_modality <- ifelse(filteredpars.ms$Condition == "ASL", 
 
 ggplot(aes(x = Condition, y = mean, fill = language_modality), 
        data = filter(filteredpars.ms, Param %in% c("Drift", "Separation"))) +
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  facet_wrap(~Param, ncol = 4) +
+  scale_fill_solarized() + 
+  ylab("Mean Param Value") +
+  guides(fill = F) +
+  theme(text = element_text(size = 30))
+```
+
+ASL and Face by their combined cutoff
+```{r}
+dfiltered_ASLFace <- filter(d, stimuli == "ASL" | stimuli == "Face", q >= ASLFacecut)
+filteredpars_ASLFace <- sub.pars
+conditions <- unique(as.character(dfiltered_ASLFace$stimuli))
+subs <- unique(as.character(dfiltered_ASLFace$Sub.Num))
+
+for (j in 1:length(subs)) {
+  sid <- as.character(subs[j]) 
+  dat <- as.data.frame(filter(dfiltered_ASLFace, Sub.Num == sid))
+  condition_type <- unique(as.character(dat$stimuli))
+  hearing_status <- unique(as.character(dat$hearing_status_participant))
+  age <- unique(as.character(dat$Months))
+  # fit ddm for each participant 
+  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+               dat=select(dat, c(q, resp)), method="Nelder-Mead")
+  pars <- c(opt$par, condition_type, hearing_status, age, sid)
+  filteredpars_ASLFace[j,] <- pars
+} 
+```
+
+Density plot
+```{r plotpars, fig.width=8, fig.height=6}
+
+# formatting data
+filteredpars_ASLFace$Separation <-
+  as.numeric(filteredpars_ASLFace$Separation)
+filteredpars_ASLFace$Non.Decision <-
+  as.numeric(filteredpars_ASLFace$Non.Decision)
+filteredpars_ASLFace$Bias <-
+  as.numeric(filteredpars_ASLFace$Bias)
+filteredpars_ASLFace$Drift <-
+  as.numeric(filteredpars_ASLFace$Drift)
+filteredpars_ASLFace$Age.Months <-
+  as.numeric(filteredpars_ASLFace$Age.Months)
+
+filteredpars_ASLFace <- filteredpars_ASLFace %>%
+  group_by(Condition) %>%
+  # not sure whether to remove outliers
+  filter(Separation < mean(Separation) + 3 * sd(Separation),
+         Separation > mean(Separation) - 3 * sd(Separation)) %>%
+  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
+         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+  filter(Bias < mean(Bias) + 3 * sd(Bias),
+         Bias > mean(Bias) - 3 * sd(Bias)) %>%
+  filter(Drift < mean(Drift) + 3 * sd(Drift),
+         Drift > mean(Drift) - 3 * sd(Drift)) %>%
+  ungroup() %>%
+  na.omit()
+
+filteredpars_ASLFace %<>% gather(Param, Value, Separation:Drift)
+
+# actual graph
+ggplot(aes(x = Value, fill = Condition), 
+       data = filter(filteredpars_ASLFace, Param %in% c("Drift", "Separation"))) +
+  geom_density(alpha = 0.7, adjust = 1.5) + 
+  facet_grid(.~Param, scales = "free") +
+  scale_fill_solarized()
+```
+
+Bargraph:
+```{r}
+filteredpars_ASLFace.ms <- filteredpars_ASLFace %>%
+  group_by(Condition, Param) %>%
+  multi_boot_standard(column = "Value", empirical_function = "mean")
+
+filteredpars_ASLFace.ms$Condition <-
+  factor(filteredpars_ASLFace.ms$Condition, levels = c("ASL", "Face"))
+
+filteredpars_ASLFace.ms$language_modality <-
+  ifelse(filteredpars_ASLFace.ms$Condition == "ASL", "ASL", "English")
+
+ggplot(aes(x = Condition, y = mean, fill = language_modality), 
+       data = filter(filteredpars_ASLFace.ms, Param %in% c("Drift", "Separation"))) +
   geom_bar(stat = "identity") + 
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
   facet_wrap(~Param, ncol = 4) +
@@ -1291,16 +1374,14 @@ timecourse$C_D <- as.numeric(C_D)
 timecourse$C_T <- as.numeric(C_T)
 timecourse$off_center <- as.numeric(off_center)
 
-plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center"))
+plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + ylab("Fixation")
 plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
 
-## TODO - separate graphs for correct and incorrect with separate lines for target, distractor, and center (see speed-acc-profile-plots)
-## TODO - just include target and distractor, not center for ASL and Face
 ## TODO - calculate area between correct and incorrect after incorrect crosses .5 for all conditions (see Yurovsky Social Reference) - make curves first
 ```
 
 
-### Alternative timecourse plot based on the proportion looking at target as opposed to distractor (not including center fixation)
+Alternative timecourse plot based on the proportion looking at target as opposed to distractor (not including center fixation)
 
 ASL
 ```{r}
@@ -1334,8 +1415,8 @@ timecourse_ASL$C_D <- as.numeric(C_D)
 timecourse_ASL$C_T <- as.numeric(C_T)
 timecourse_ASL$off_center <- as.numeric(off_center)
 
-plot <- ggplot(timecourse_ASL, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + ylab(label = "Fixation")
-plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
+ggplot(timecourse_ASL, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + ylab(label = "Fixation")
+# plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
 ```
 
 Face
@@ -1362,9 +1443,72 @@ timecourse_Face$C_T <- as.numeric(C_T)
 timecourse_Face$C_C <- as.numeric(C_C)
 timecourse_Face$off_center <- as.numeric(off_center)
 
-plot <- ggplot(timecourse_Face, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + geom_line(aes(y = C_C, color = "Center to Center?")) + ylab("Fixation")
-plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
+ggplot(timecourse_Face, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + geom_line(aes(y = C_C, color = "Center to Center?")) + ylab("Fixation")
+# plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
 ```
+
+Together
+```{r}
+timecourse_ASLFace <- idata %>%
+  filter(age_code == "child", stimuli == "Face" | stimuli == "ASL", trial_type == "C_T" | trial_type == "C_D") %>%
+  group_by(trial_type, stimuli) %>%
+  mutate_each(funs(removecenter), 10:100) %>%
+  summarise_each(funs(mean(., na.rm = T)), 10:100) %>%
+  t()
+
+timecourse_ASLFace <- timecourse_ASLFace[3:93,]
+CD_ASL <- timecourse_ASLFace[, 1]
+CD_Face <- timecourse_ASLFace[, 2]
+CT_ASL <- timecourse_ASLFace[, 3]
+CT_Face <- timecourse_ASLFace[, 4]
+timecourse_ASLFace <- data.frame(timecourse_ASLFace)
+
+names <- rownames(timecourse_ASLFace)
+timecourse_ASLFace$time <- as.numeric(names)
+timecourse_ASLFace$CD_ASL <- as.numeric(CD_ASL)
+timecourse_ASLFace$CD_Face <- as.numeric(CD_Face)
+timecourse_ASLFace$CT_ASL <- as.numeric(CT_ASL)
+timecourse_ASLFace$CT_Face <- as.numeric(CT_Face)
+
+ggplot(timecourse_ASLFace, aes(x = time)) + geom_line(aes(y = CD_ASL, color = "incorrect ASL")) + geom_line(aes(y = CD_Face, color = "incorrect Face")) + geom_line(aes(y = CT_ASL, color = "correct ASL")) + geom_line(aes(y = CT_Face, color = "correct Face")) + ylab("Fixation")
+```
+
+### Timecourse plots with separate lines for proportion looking at center, target, and distractor
+```{r}
+## TODO - separate graphs for correct and incorrect with separate lines for target, distractor, and center (see speed-acc-profile-plots)
+
+timecourse_alt <- idata %>%
+  filter(age_code == "child", stimuli == "ASL", trial_type != "no_shift")
+
+col = 10
+times <- timecourse_alt %>%
+    group_by(trial_type, timecourse_alt[,col]) %>%
+    summarize(n())
+
+for(col in colnames(timecourse_alt)[11:100]){
+  timeslot <- timecourse_alt %>%
+    group_by(trial_type, timecourse_alt[,col]) %>%
+    summarize(n())
+  times <- merge(times, timeslot, by = c("trial_type", "timecourse_alt[,col]"))
+}
+  
+  t()
+
+colnames(timecourse) <- timecourse[1,]
+timecourse <- timecourse[2:92,]
+C_D <- timecourse[, 1]
+C_T <- timecourse[, 2]
+off_center <- timecourse[, 3]
+timecourse <- data.frame(timecourse)
+
+names <- rownames(timecourse)
+timecourse$time <- as.numeric(names)
+timecourse$C_D <- as.numeric(C_D)
+timecourse$C_T <- as.numeric(C_T)
+timecourse$off_center <- as.numeric(off_center)
+
+plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center"))
+plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
 ```
 
 ## Scatterplot of RT vs dweltime of incorrect ASL and English responses
@@ -1404,13 +1548,52 @@ fitEng <- (lm(dwel ~ RT, data = filter(dweltime, language_modality == "English")
 ggplot(dweltime, aes(x = RT, y = dwel, color = language_modality)) + geom_point() + geom_abline(intercept = fitASL$coefficients["(Intercept)"], slope = fitASL$coefficients["RT"], color = "red") + geom_abline(intercept = fitEng$coefficients["(Intercept)"], slope = fitEng$coefficients["RT"], color = "blue")
 ```
 
-Average dweltimes
+Average dweltimes - for incorrect trials
 ```{r}
-avgdwel_all <- dweltime %>%
+avgdwel_incorrect_all <- dweltime %>%
   group_by(language_modality) %>%
   summarize(avg = mean(dwel))
 
-avgdwel_FaceASL <- dweltime %>%
+avgdwel_incorrect_FaceASL <- dweltime %>%
+  filter(stimuli == "Face" | stimuli == "ASL") %>%
+  group_by(stimuli) %>%
+  summarize(avg = mean(dwel))
+```
+
+Average dweltimes - for correct trials
+```{r}
+# calculating dwel times
+dwel_correct <- idata %>%
+  filter(age_code == "child", trial_type == "C_T", is.na(RT) == F)
+
+dwel_correct <- mutate(dwel_correct, dwel = numeric(nrow(dwel_correct)))
+
+for(rownum in 1:nrow(dwel_correct)){
+  dwel_correct[rownum, "dwel"] <- 0
+  for(colnum in 10:100){
+    if(dwel_correct[rownum, "dwel"] == 0 &&
+       as.numeric(colnames(dwel_correct)[colnum]) > dwel_correct[rownum, "RT"] &&
+       is.na(dwel_correct[rownum, colnum]) == F &&
+        dwel_correct[rownum, colnum] < 1){
+      dwel_correct[rownum, "dwel"] <- as.numeric(colnames(dwel_correct)[colnum]) - dwel_correct[rownum, "RT"]
+      break
+    }
+  }
+ }
+
+dwel_correct <- filter(dwel_correct, dwel != 0)
+
+# graph
+fitASL <- lm(dwel ~ RT, data = filter(dwel_correct, language_modality == "ASL"))
+fitEng <- (lm(dwel ~ RT, data = filter(dwel_correct, language_modality == "English")))
+ggplot(dwel_correct, aes(x = RT, y = dwel, color = language_modality)) + geom_point() + geom_abline(intercept = fitASL$coefficients["(Intercept)"], slope = fitASL$coefficients["RT"], color = "red") + geom_abline(intercept = fitEng$coefficients["(Intercept)"], slope = fitEng$coefficients["RT"], color = "blue")
+
+# averages
+avgdwel_correct_all <- dwel_correct %>%
+  group_by(language_modality) %>%
+  summarize(avg = mean(dwel))
+
+avgdwel_correct_FaceASL <- dwel_correct %>%
   filter(stimuli == "Face" | stimuli == "ASL") %>%
   group_by(stimuli) %>%
   summarize(avg = mean(dwel))

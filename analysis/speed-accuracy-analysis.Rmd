@@ -857,30 +857,43 @@ ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli),
 ### Split by RT Range
 
 ```{r}
+rt_range <- 3000
+n_bins <- 10
+break_seq <- seq(0, rt_range, rt_range/n_bins)
+
 timeslice_range <- df %>%
   filter(age_code == "child", is.na(RT_sec) == F) %>%
-  mutate(RT_bin = cut(RT, breaks = c(0, sequence(6)*500))) %>%
+  mutate(RT_bin = cut(RT, breaks = break_seq)) %>%
   group_by(RT_bin, stimuli) %>%
   mutate(RT_bin_avg = mean(RT, na.rm = T))
+
 count_range <- timeslice_range %>%
   group_by(RT_bin, stimuli) %>%
   summarise(subjcount = n_distinct(Sub.Num), totalcount = n())
+
 timeslice_range <- timeslice_range %>%
   group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
   summarise(ss_acc = mean(correct, na.rm=T)) %>% 
-  group_by(RT_bin_avg, stimuli) %>% 
-  multi_boot_standard("ss_acc")
+  group_by(RT_bin_avg, stimuli) %>%
+  summarise(mean = mean(ss_acc),
+            n = n())
+# %>% 
+#   multi_boot_standard("ss_acc")
 
-ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli), 
+ggplot(aes(x=RT_bin_avg, y=mean, weight = n, 
+           color = stimuli, group = stimuli), 
        data = timeslice_range) + 
-  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  geom_line() +
+  geom_point(aes(size = n)) +
+  # geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  # geom_line() +
+  # geom_smooth(se=FALSE, span=1) 
+  geom_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE) +
   scale_color_solarized() +
   geom_hline(yintercept = 0.5, lty = "dashed") +
-  guides(color = F) +
+  #guides(color = F) +
   xlab("Average RT by 100 ms") +
-  ylab("Proportion Correct")  +
-  theme(text = element_text(size=30)) 
+  ylab("Proportion Correct") # +
+  #theme(text = element_text(size=30)) 
 ```
 
 
@@ -1025,7 +1038,7 @@ ewma <- function(data){
   #   geom_line(aes(y = ucl, color = "UCL")) +
   #   geom_vline(aes(xintercept = cutoff), linetype = 2)
   
-  return(cutoff) # comment out to show graph instead
+   return(cutoff) # comment out to show graph instead
 }
 
 # try various values of lambda (wide range)
@@ -1041,19 +1054,19 @@ overallcut <- # comment out to show graph instead
   ewma(ewma_data)/1000 # also the division
 
 ASLFace_ewma <- filter(ewma_data, stimuli == "ASL" || stimuli == "Face")
-ASLFacecut <-
-  ewma(ASLFace_ewma)/1000
+ ASLFacecut <-
+   ewma(ASLFace_ewma)/1000
 
 ASL_ewma <- filter(ewma_data, stimuli == "ASL")
-ASLcut <-
-  ewma(ASL_ewma)/1000
+ ASLcut <-
+   ewma(ASL_ewma)/1000
 
 Face_ewma <- filter(ewma_data, stimuli == "Face")
-Facecut <-
-  ewma(Face_ewma)/1000
+ Facecut <-
+   ewma(Face_ewma)/1000
 
 Obj_ewma <- filter(ewma_data, stimuli == "Object")
-Objcut <-
+ Objcut <-
   ewma(Obj_ewma)/1000
 
 Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
@@ -1110,6 +1123,8 @@ for (j in 1:length(subs)) {
   pars <- c(opt$par, condition_type, hearing_status, age, sid)
   filteredpars[j,] <- pars
 } 
+
+## TODO - vary Face cutoff and see how drift changes
 ```
 
 Graphed:
@@ -1475,7 +1490,7 @@ ggplot(timecourse_ASLFace, aes(x = time)) + geom_line(aes(y = CD_ASL, color = "i
 
 ### Timecourse plots with separate lines for proportion looking at center, target, and distractor
 ```{r}
-## TODO - separate graphs for correct and incorrect with separate lines for target, distractor, and center (see speed-acc-profile-plots)
+## TODO - change values into proportion
 
 timecourse_alt <- idata %>%
   filter(age_code == "child", stimuli == "ASL", trial_type != "no_shift")
@@ -1485,30 +1500,58 @@ times <- timecourse_alt %>%
     group_by(trial_type, timecourse_alt[,col]) %>%
     summarize(n())
 
-for(col in colnames(timecourse_alt)[11:100]){
+for(col in 11:100){
   timeslot <- timecourse_alt %>%
     group_by(trial_type, timecourse_alt[,col]) %>%
     summarize(n())
-  times <- merge(times, timeslot, by = c("trial_type", "timecourse_alt[,col]"))
+  times <- merge(times, timeslot, by = 1:2, all.x = T, all.y = T)
 }
-  
+
+colnames(times)[2] <- 'fixation'
+colnames(times)[3:93] <- colnames(timecourse_alt)[10:100]
+times <- times %>%
+  filter(is.na(fixation) == F) %>%
+  mutate(fixation = ifelse(fixation == 0.0, "distractor",
+                           ifelse(fixation == 1.0, "target",
+                                  "center"))) %>%
   t()
+times[is.na(times)] <- 0
 
-colnames(timecourse) <- timecourse[1,]
-timecourse <- timecourse[2:92,]
-C_D <- timecourse[, 1]
-C_T <- timecourse[, 2]
-off_center <- timecourse[, 3]
-timecourse <- data.frame(timecourse)
+names <- rownames(times)[3:93]
+d_dist <- times[3:93, 1]
+d_cent <- times[3:93, 2]
+d_target <- times[3:93, 3]
+t_dist <- times[3:93, 4]
+t_cent <- times[3:93, 5]
+t_target <- times[3:93, 6]
+off_dist <- times[3:93, 7]
+off_cent <- times[3:93, 8]
+off_target <- times[3:93, 9]
 
-names <- rownames(timecourse)
-timecourse$time <- as.numeric(names)
-timecourse$C_D <- as.numeric(C_D)
-timecourse$C_T <- as.numeric(C_T)
-timecourse$off_center <- as.numeric(off_center)
+times_CD <- data.frame(time = as.numeric(names))
+times_CT <- data.frame(time = as.numeric(names))
+times_off <- data.frame(time = as.numeric(names))
 
-plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center"))
-plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
+times_CD$distractor <- as.numeric(d_dist)
+times_CD$center <- as.numeric(d_cent)
+times_CD$target <- as.numeric(d_target)
+times_CT$distractor <- as.numeric(t_dist)
+times_CT$center <- as.numeric(t_cent)
+times_CT$target <- as.numeric(t_target)
+times_off$distractor <- as.numeric(off_dist)
+times_off$center <- as.numeric(off_cent)
+times_off$target <- as.numeric(off_target)
+
+plot <- function(data){
+  ggplot(data, aes(x = time)) +
+    geom_line(aes(y = distractor, color = "distractor")) +
+    geom_line(aes(y = target, color = "target")) +
+    geom_line(aes(y = center, color = "center"))
+}
+
+plot(times_CD)
+plot(times_CT)
+plot(times_off)
 ```
 
 ## Scatterplot of RT vs dweltime of incorrect ASL and English responses
@@ -1597,4 +1640,9 @@ avgdwel_correct_FaceASL <- dwel_correct %>%
   filter(stimuli == "Face" | stimuli == "ASL") %>%
   group_by(stimuli) %>%
   summarize(avg = mean(dwel))
+
+## TODO - pretty ddm/ewma results and to do
+## TODO - set up rpubs
+## TODO - pretty behavioral analyses (timecourse plots and the like)
+## TODO - look into purrr for more abstract coding
 ```

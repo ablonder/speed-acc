@@ -1019,26 +1019,30 @@ ewma <- function(data){
   cs <- .5 # control mean
   sigma <- .5 # control standard deviation
   L <- 1.5 # width of control limits
-  s <- 0 # counter
-  ewma_results <- data.frame(rt = integer(0), cs = integer(0), ucl = integer(0))
+  results <- data.frame(rt = integer(0), cs = integer(0), ucl = integer(0))
   for(row in 1:nrow(data)){
     subj <- data[row, ]
     acc <- as.integer(subj["correct"])
     rt <- as.integer(subj["RT"])
-    cs <- lambda*acc + (1-lambda)*cs
-    UCL <- .5 + L*sigma*sqrt((lambda/(2 - lambda))*(1-((1-lambda)^(2*row))))
-    ewma_results[row, ] <- c(rt, cs, UCL)
+    cs <- lambda*acc + (1-lambda)*cs # weighted average for each rt (row)
+    UCL <- .5 + L*sigma*sqrt((lambda/(2 - lambda))*(1-((1-lambda)^(2*row)))) # threshold
+    results[row, ] <- c(rt, cs, UCL)
     if(row != 1 && cs < UCL)
       cutoff <- rt
   }
   
-  # uncomment to show graph
-  # ggplot(ewma_results, aes(rt)) +
-  #   geom_line(aes(y = cs, color = "cs")) +
-  #   geom_line(aes(y = ucl, color = "UCL")) +
-  #   geom_vline(aes(xintercept = cutoff), linetype = 2)
+   return(list(cutoff = cutoff/1000, results = results))
+}
+
+
+# graph EWMA results
+ewma_graph = function(ewma_results){
+  plot <- ggplot(ewma_results, aes(rt)) +
+     geom_line(aes(y = cs, color = "cs")) +
+     geom_line(aes(y = ucl, color = "UCL")) +
+     geom_vline(aes(xintercept = cutoff), linetype = 2)
   
-   return(cutoff) # comment out to show graph instead
+  return(plot)
 }
 
 # try various values of lambda (wide range)
@@ -1050,28 +1054,32 @@ Now to run data through it
 ewma_data <- df %>% 
   filter(age_code == "child", is.na(RT) == F) %>%
   arrange(RT)
-overallcut <- # comment out to show graph instead
-  ewma(ewma_data)/1000 # also the division
 
+# all conditions run together
+overallcut <- ewma(ewma_data)
+
+# just Face and ASL run together
 ASLFace_ewma <- filter(ewma_data, stimuli == "ASL" || stimuli == "Face")
- ASLFacecut <-
-   ewma(ASLFace_ewma)/1000
+ASLFacecut <- ewma(ASLFace_ewma)
 
+ # ASL run separately
 ASL_ewma <- filter(ewma_data, stimuli == "ASL")
- ASLcut <-
-   ewma(ASL_ewma)/1000
+ASLcut <- ewma(ASL_ewma)
 
+# Face run separately
 Face_ewma <- filter(ewma_data, stimuli == "Face")
- Facecut <-
-   ewma(Face_ewma)/1000
+ Facecut <- ewma(Face_ewma)
 
-Obj_ewma <- filter(ewma_data, stimuli == "Object")
- Objcut <-
-  ewma(Obj_ewma)/1000
+# Object run separately
+ Obj_ewma <- filter(ewma_data, stimuli == "Object")
+ Objcut <- ewma(Obj_ewma)
 
+ # Bullseye run separately
 Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
-Bullcut <-
-  ewma(Bull_ewma)/1000
+Bullcut <- ewma(Bull_ewma)
+
+## TODO - remove slow responses ie. after 2000 ms
+## TODO - replace bargraphs with boxplots
 ```
 
 Average accuracy for all conditions past cutoff
@@ -1079,23 +1087,23 @@ Average accuracy for all conditions past cutoff
 # ASL and Face after their respective cutoffs
 filteredavgs_Face <- df %>%
   filter(age_code == "child", is.na(RT) == F,
-         stimuli == "Face", RT_sec >= Facecut) %>%
+         stimuli == "Face", RT >= Facecut['cutoff']) %>%
   summarize(avg = mean(correct, na.rm=T))
 
 filteredavgs_ASL <- df %>%
   filter(age_code == "child", is.na(RT) == F,
-         stimuli == "ASL", RT_sec >= ASLcut) %>%
+         stimuli == "ASL", RT >= ASLcut['cutoff']) %>%
   summarize(avg = mean(correct, na.rm=T))
 
 # ASL and Face after their combined cutoff
 filteredavgs_ASLFace <- df %>%
-  filter(age_code == "child", is.na(RT) == F, stimuli == "ASL" | stimuli == "Face", RT_sec >= ASLFacecut) %>%
+  filter(age_code == "child", is.na(RT) == F, stimuli == "ASL" | stimuli == "Face", RT >= ASLFacecut['cutoff']) %>%
   group_by(stimuli) %>%
   summarize(avg = mean(correct, na.rm = T))
 
 # All conditions past the overall cutoff
 filteredavgs_all <- df %>%
-  filter(age_code == "child", is.na(RT) == F, RT_sec >= overallcut) %>%
+  filter(age_code == "child", is.na(RT) == F, RT >= overallcut['cutoff']) %>%
   group_by(stimuli) %>%
   summarize(avg = mean(correct, na.rm=T))
 ```
@@ -1105,8 +1113,8 @@ filteredavgs_all <- df %>%
 
 Just ASL and Face conditions by their respective cutoffs
 ```{r estpars}
-dfiltered <- filter(d, (stimuli == "ASL" & q >= ASLcut)
-                    | (stimuli == "Face" & q >= Facecut))
+dfiltered <- filter(d, (stimuli == "ASL" & q >= ASLcut['cutoff'])
+                    | (stimuli == "Face" & q >= Facecut['cutoff']))
 filteredpars <- sub.pars
 conditions <- unique(as.character(dfiltered$stimuli))
 subs <- unique(as.character(dfiltered$Sub.Num))
@@ -1185,7 +1193,7 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
 
 ASL and Face by their combined cutoff
 ```{r}
-dfiltered_ASLFace <- filter(d, stimuli == "ASL" | stimuli == "Face", q >= ASLFacecut)
+dfiltered_ASLFace <- filter(d, stimuli == "ASL" | stimuli == "Face", q >= ASLFacecut['cutoff'])
 filteredpars_ASLFace <- sub.pars
 conditions <- unique(as.character(dfiltered_ASLFace$stimuli))
 subs <- unique(as.character(dfiltered_ASLFace$Sub.Num))
@@ -1269,9 +1277,9 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
 
 All conditions cut based on the overall cutoff
 ```{r estpars}
-dfiltered_all <- filter(d, q >= overallcut)
+dfiltered_all <- filter(d, q >= overallcut['cutoff'])
 filteredpars_all <-sub.pars
-conditions <- unique(as.character(dfiltered$stimuli))
+conditions <- unique(as.character(dfiltered_all$stimuli))
 subs <- unique(as.character(dfiltered_all$Sub.Num))
 
 for (j in 1:length(subs)) {
@@ -1300,16 +1308,16 @@ filteredpars_all$Age.Months <- as.numeric(filteredpars_all$Age.Months)
 
 filteredpars_all <- filteredpars_all %>%
   # not sure whether to remove outliers
-  # group_by(Condition) %>%
-  # filter(Separation < mean(Separation) + 3 * sd(Separation), 
-  #        Separation > mean(Separation) - 3 * sd(Separation)) %>%
-  # filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision), 
-  #        Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
-  # filter(Bias < mean(Bias) + 3 * sd(Bias), 
-  #        Bias > mean(Bias) - 3 * sd(Bias)) %>%
-  # filter(Drift < mean(Drift) + 3 * sd(Drift), 
-  #        Drift > mean(Drift) - 3 * sd(Drift)) %>%
-  # ungroup() %>%
+  group_by(Condition) %>%
+  filter(Separation < mean(Separation) + 3 * sd(Separation),
+         Separation > mean(Separation) - 3 * sd(Separation)) %>%
+  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
+         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+  filter(Bias < mean(Bias) + 3 * sd(Bias),
+         Bias > mean(Bias) - 3 * sd(Bias)) %>%
+  filter(Drift < mean(Drift) + 3 * sd(Drift),
+         Drift > mean(Drift) - 3 * sd(Drift)) %>%
+  ungroup() %>%
   na.omit()
 
 filteredpars_all %<>% gather(Param, Value, Separation:Drift)

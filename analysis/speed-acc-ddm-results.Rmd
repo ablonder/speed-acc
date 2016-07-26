@@ -1,0 +1,518 @@
+---
+title: "Drift Diffusion Model Results"
+author: "Aviva Blonder"
+date: "July 25, 2016"
+output: html_document
+---
+
+```{r chunk_options, echo = F, include = F}
+# Set up!
+
+rm(list=ls()) # code to clear workspace
+
+knitr::opts_chunk$set(warning=F, message=F, sanitize = T, 
+                      fig.height=5, fig.width=8, echo=T, cache = T)
+knitr::opts_knit$set(root.dir = "/home/gryfalconess/Documents/CSLI/speed-acc")
+
+set.seed(0) # to reproduce simulations
+
+library(langcog)
+library(magrittr)
+library(RWiener)
+library(stringr)
+library(GGally)
+library(kmr)
+library(lme4)
+library(lsr)
+library(plyr)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stats)
+library(gridExtra)
+theme_set(theme_bw()) # set the ggplot theme that we think is pretty
+setwd("/home/gryfalconess/Documents/CSLI/speed-acc")
+```
+
+Reading in and minimal formatting of reaction time and accuracy data
+```{r}
+df <- read.csv("data/3_final_merged_data/speed-acc-ss-df.csv", 
+               check.names=F, stringsAsFactors=F) 
+
+df %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
+                          ifelse(stimuli == "Trio", "Object", 
+                                 ifelse(stimuli == "Bull", "Bullseye",
+                                        stimuli))),
+         stimuli = factor(stimuli, levels = c("ASL", "Face", "Object", "Bullseye")))
+```
+
+# Off-the-shelf Drift Diffusion Model
+
+Workflow taken from Nordmeyer et al. (2016). We estimate parameters separately for each participant and then aggregate across participants to get means & confidence intervals on the parameters.
+
+The parameters of the drift drift diffusion model are: 
+
+* $\alpha$ = boundary separation: speed-accuracy tradeoff (higher values mean higher accuracy)
+* $\beta$ = initial bias
+* $\delta$ = drift rate: speed of information processing (close to zero means ambiguous information)
+* $\tau$ = nondecision time: motor response time
+
+## Estimating parameters
+
+Formatting the relevant data for Rwiener functions
+```{r}
+# columns need to be named "q" for RT and "resp" for response
+d <- df %>% 
+  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, RT_sec > .1) %>% 
+  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
+  mutate(resp = factor(correct),
+         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+         resp = relevel(resp, "upper")) %>% 
+  rename(q = RT_sec)
+```
+
+```{r}
+sub.pars <- data.frame(Separation = numeric(),
+                       Non.Decision = numeric(),
+                       Bias = numeric(),
+                       Drift = numeric(),
+                       Condition = character(),
+                       Hearing.Status = character(),
+                       Age.Months = character(),
+                       Sub.Num = character(),
+                       stringsAsFactors = F)
+
+
+#because RWiener is finicky:
+d$resp <- as.character(d$resp)
+```
+
+Fitting the Drift Diffusion Model for each participant
+```{r}
+conditions <- unique(as.character(d$stimuli))
+subs <- unique(as.character(d$Sub.Num))
+
+for (j in 1:length(subs)) {
+  sid <- as.character(subs[j]) 
+  dat <- as.data.frame(filter(d, Sub.Num == sid))
+  condition_type <- unique(as.character(dat$stimuli))
+  hearing_status <- unique(as.character(dat$hearing_status_participant))
+  age <- unique(as.character(dat$Months))
+  # fit ddm for each participant 
+  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+               dat=select(dat, c(q, resp)), method="Nelder-Mead")
+  pars <- c(opt$par, condition_type, hearing_status, age, sid)
+  sub.pars[j,] <- pars
+} 
+```
+
+## Plotting Parameters
+
+This plot shows the mean parameter values & 95% C.I.s for each stimuli type
+```{r, fig.width=8, fig.height=6}
+sub.pars$Separation <- as.numeric(sub.pars$Separation)
+sub.pars$Non.Decision <- as.numeric(sub.pars$Non.Decision)
+sub.pars$Bias <- as.numeric(sub.pars$Bias)
+sub.pars$Drift <- as.numeric(sub.pars$Drift)
+sub.pars$Age.Months <- as.numeric(sub.pars$Age.Months)
+
+sub.pars <- sub.pars %>% 
+  # removes outliers
+  group_by(Condition) %>%
+  filter(Separation < mean(Separation) + 3 * sd(Separation), 
+         Separation > mean(Separation) - 3 * sd(Separation)) %>%
+  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision), 
+         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+  filter(Bias < mean(Bias) + 3 * sd(Bias), 
+         Bias > mean(Bias) - 3 * sd(Bias)) %>%
+  filter(Drift < mean(Drift) + 3 * sd(Drift), 
+         Drift > mean(Drift) - 3 * sd(Drift)) %>%
+  ungroup() %>%
+  na.omit()
+
+sub.pars %<>% gather(Param, Value, Separation:Drift)
+```
+
+Distributions of parameters across conditions
+```{r}
+ggplot(aes(x = Value, fill = Condition), 
+       data = filter(sub.pars, Param %in% c("Drift", "Separation"))) +
+  geom_density(alpha = 0.7, adjust = 1.5) + 
+  facet_grid(.~Param, scales = "free") +
+  scale_fill_solarized()
+```
+
+So far so good:
+
+* Boundary separation tends higher in the ASL condition, indicating an emphasis on accuracy over speed
+* Drift seems to be skewed a little higher in the ASL condition, which was not expected
+* A surprising number of individuals in the Object and Bullseye conditions have negative drifts, which is a little worrying, since it suggests that they gathered information in favor of the distractor
+
+
+Means and CIs for parameter values
+```{r}
+sub.pars.ms <- sub.pars %>%
+  group_by(Condition, Param) %>%
+  multi_boot_standard(column = "Value", empirical_function = "mean")
+
+sub.pars.ms$Condition <- factor(sub.pars.ms$Condition, 
+                                levels = c("ASL", "Face", "Object", "Bullseye"))
+
+sub.pars.ms$language_modality <- ifelse(sub.pars.ms$Condition == "ASL", "ASL", "English")
+
+ggplot(aes(x = Condition, y = mean, fill = language_modality), 
+       data = filter(sub.pars.ms, Param %in% c("Drift", "Separation"))) +
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  facet_wrap(~Param, ncol = 4) +
+  scale_fill_solarized() + 
+  ylab("Mean Param Value") +
+  guides(fill = F) +
+  theme(text = element_text(size = 20)) 
+```
+
+Good things first:
+
+* Boundary separation is highest in the ASL condition, again reflecting a prioritization of accuracy over speed, which makes sense - they have to stay fixated on the signer to know where to look, so they should be less likely to look away and more accurate when they do
+Problems:
+* No drift in the Object and Bullseye conditions, suggesting that they're not gathering any information, which doesn't make any sense - they're still hearing the speaker 
+* Higher drift in the ASL condition, suggesting that they're gathering more information, even though they're being exposed the same target word
+It looks like some of the children, especially the ones being spoken to in English, are looking around randomly before they hear the target word, which isn't really a decision process. Those trials should be filtered out in a non-arbitrary way.
+
+# Exponentially Weighted Moving Average Filter
+
+Vandekerckhove & Tuerlinckx (2007) use an Exponentially Weighted Moving Average (EWMA) to filter reaction time and accuracy data. It is used to remove "fast guesses" that don't reflect a decision process and therefore can't be modeled by a Drift Diffusion Model.
+It goes through a data set ordered by reaction time, calculating the mean for each data point based on the weighted average of the points before it. At each data point, the mean is compared to a calculated threshold to determine if subjects' accuracy at that point is above chance. The cutoff is the point at which subjects' responses are reliably above chance and therefore the result of a decision process.
+
+```{r}
+ewma <- function(data){
+  # EWMA by hand
+  lambda <- .01 # weight of previous parameters
+  cs <- .5 # control mean
+  sigma <- .5 # control standard deviation
+  L <- 1.5 # width of control limits
+  results <- data.frame(rt = integer(0), cs = integer(0), ucl = integer(0))
+  for(row in 1:nrow(data)){
+    subj <- data[row, ]
+    acc <- as.integer(subj["correct"])
+    rt <- as.integer(subj["RT"])
+    cs <- lambda*acc + (1-lambda)*cs # weighted average for each rt (row)
+    UCL <- .5 + L*sigma*sqrt((lambda/(2 - lambda))*(1-((1-lambda)^(2*row)))) # threshold
+    results[row, ] <- c(rt, cs, UCL)
+    if(row != 1 && cs < UCL)
+      cutoff <- rt
+  }
+  
+   return(list(cutoff = cutoff, results = results))
+}
+
+```
+
+Function used to graph EWMA results
+```{r}
+ewma_graph = function(ewma_results){
+  results = as.data.frame(ewma_results['results'])
+  cutoff = as.numeric(ewma_results['cutoff'])
+  plot <- ggplot(results, aes(results.rt)) +
+     geom_line(aes(y = results.cs, color = "cs")) +
+     geom_line(aes(y = results.ucl, color = "UCL")) +
+     geom_vline(aes(xintercept = cutoff), linetype = 2) +
+    ylab("Moving Average") + xlab("Reaction Time")
+  
+  return(plot)
+}
+```
+
+## Combined EWMA Filter
+
+Running and visualizing the filter
+```{r}
+# organize data for use
+ewma_data <- df %>% 
+  filter(age_code == "child", is.na(RT) == F) %>%
+  arrange(RT)
+# running the ewma
+overallcut <- ewma(ewma_data)
+
+# graph
+ewma_graph(overallcut)
+```
+
+The dashed line where the weighted average (cs) crosses the threshold (UCL) is the cutoff. All reaction times past that point are considered evidence of a decision process and can be modeled as a diffusion process.
+
+### The resulting paramters:
+
+Set up
+```{r}
+# columns need to be named "q" for RT and "resp" for response
+dfiltered_all <- df %>% 
+  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, RT >= overallcut['cutoff']) %>% 
+  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
+  mutate(resp = factor(correct),
+         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+         resp = relevel(resp, "upper")) %>% 
+  rename(q = RT_sec)
+```
+
+```{r}
+filteredpars_all <- data.frame(Separation = numeric(),
+                       Non.Decision = numeric(),
+                       Bias = numeric(),
+                       Drift = numeric(),
+                       Condition = character(),
+                       Hearing.Status = character(),
+                       Age.Months = character(),
+                       Sub.Num = character(),
+                       stringsAsFactors = F)
+
+
+#because RWiener is finicky:
+dfiltered_all$resp <- as.character(dfiltered_all$resp)
+```
+
+Parameter estimation
+```{r}
+conditions <- unique(as.character(dfiltered_all$stimuli))
+subs <- unique(as.character(dfiltered_all$Sub.Num))
+
+for (j in 1:length(subs)) {
+  sid <- as.character(subs[j]) 
+  dat <- as.data.frame(filter(dfiltered_all, Sub.Num == sid))
+  condition_type <- unique(as.character(dat$stimuli))
+  hearing_status <- unique(as.character(dat$hearing_status_participant))
+  age <- unique(as.character(dat$Months))
+  # fit ddm for each participant 
+  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+               dat=select(dat, c(q, resp)), method="Nelder-Mead")
+  pars <- c(opt$par, condition_type, hearing_status, age, sid)
+  filteredpars_all[j,] <- pars
+} 
+```
+
+Density graph
+```{r, fig.width=8, fig.height=6}
+
+# formatting data
+filteredpars_all$Separation <- as.numeric(filteredpars_all$Separation)
+filteredpars_all$Non.Decision <- as.numeric(filteredpars_all$Non.Decision)
+filteredpars_all$Bias <- as.numeric(filteredpars_all$Bias)
+filteredpars_all$Drift <- as.numeric(filteredpars_all$Drift)
+filteredpars_all$Age.Months <- as.numeric(filteredpars_all$Age.Months)
+
+filteredpars_all <- filteredpars_all %>%
+  # remove outliers so that they don't have a huge impact
+  group_by(Condition) %>%
+  filter(Separation < mean(Separation) + 3 * sd(Separation),
+         Separation > mean(Separation) - 3 * sd(Separation)) %>%
+  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
+         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+  filter(Bias < mean(Bias) + 3 * sd(Bias),
+         Bias > mean(Bias) - 3 * sd(Bias)) %>%
+  filter(Drift < mean(Drift) + 3 * sd(Drift),
+         Drift > mean(Drift) - 3 * sd(Drift)) %>%
+  ungroup() %>%
+  na.omit()
+
+filteredpars_all %<>% gather(Param, Value, Separation:Drift)
+
+# actual graph
+ggplot(aes(x = Value, fill = Condition), 
+       data = filter(filteredpars_all, Param %in% c("Drift", "Separation"))) +
+  geom_density(alpha = 0.7, adjust = 1.5) + 
+  facet_grid(.~Param, scales = "free") +
+  scale_fill_solarized()
+```
+
+Bargraph:
+```{r}
+filteredpars_all.ms <- filteredpars_all %>%
+  group_by(Condition, Param) %>%
+  multi_boot_standard(column = "Value", empirical_function = "mean")
+
+filteredpars_all.ms$Condition <- factor(filteredpars_all.ms$Condition, 
+                                levels = c("ASL", "Face", "Object", "Bullseye"))
+
+filteredpars_all.ms$language_modality <- ifelse(filteredpars_all.ms$Condition == "ASL", "ASL", "English")
+
+ggplot(aes(x = Condition, y = mean, fill = language_modality), 
+       data = filter(filteredpars_all.ms, Param %in% c("Drift", "Separation"))) +
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  facet_wrap(~Param, ncol = 4) +
+  scale_fill_solarized() + 
+  ylab("Mean Param Value") +
+  guides(fill = F) +
+  theme(text = element_text(size = 20))
+```
+
+This tells us pretty much the same thing as before. Drift is still higher in the ASL condition and is not significantly different from 0 in the Object and Bullseye conditions.
+
+## Separate EWMA Filters (by condtion)
+
+Running and visualizing the filter
+```{r}
+ewma_data <- df %>% 
+  filter(age_code == "child", is.na(RT) == F) %>%
+  arrange(RT)
+
+# ASL
+ASL_ewma <- filter(ewma_data, stimuli == "ASL")
+ASLcut <- ewma(ASL_ewma)
+
+# Face
+Face_ewma <- filter(ewma_data, stimuli == "Face")
+ Facecut <- ewma(Face_ewma)
+
+# Object
+ Obj_ewma <- filter(ewma_data, stimuli == "Object")
+ Objcut <- ewma(Obj_ewma)
+
+# Bullseye
+Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
+Bullcut <- ewma(Bull_ewma)
+
+# combined graph
+grid.arrange(ewma_graph(ASLcut) + labs(x = "", title = "ASL") + guides(colour = F),
+             ewma_graph(Facecut) + labs(x = "", y = "", title = "Face"),
+             ewma_graph(Objcut) + labs(title = "Object") + guides(colour = F),
+             ewma_graph(Bullcut) + labs(y = "", title = "Bullseye") + guides(colour = F),
+             ncol = 2, nrow = 2)
+```
+
+Again, the dashed line represents the cutoff past which all responses are considered to be the result of a decision process. In the Object and Bullseye conditions, the weighted average never crosses the threshold, indicating that most of the responses are guesses regardless of reaction time. This suggests that a Drift Diffusion Model is not the best way to represent the data from those conditions.
+
+### The resulting paramters:
+
+Since the EWMA cutoff for the Bullseye and Object conditions would eliminate all trials in those conditions, we will only run Drift Diffusion Models for the ASL and Face conditions based on their separate cutoffs.
+
+Set up:
+```{r}
+# columns need to be named "q" for RT and "resp" for response
+dfiltered_sep <- df %>% 
+  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, (stimuli == "ASL" & RT >= ASLcut['cutoff']) | (stimuli == "Face" & RT >= Facecut['cutoff'])) %>% 
+  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
+  mutate(resp = factor(correct),
+         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+         resp = relevel(resp, "upper")) %>% 
+  rename(q = RT_sec)
+```
+
+```{r}
+filteredpars_sep <- data.frame(Separation = numeric(),
+                       Non.Decision = numeric(),
+                       Bias = numeric(),
+                       Drift = numeric(),
+                       Condition = character(),
+                       Hearing.Status = character(),
+                       Age.Months = character(),
+                       Sub.Num = character(),
+                       stringsAsFactors = F)
+
+
+#because RWiener is finicky:
+dfiltered_sep$resp <- as.character(dfiltered_sep$resp)
+```
+
+Parameter estimation
+```{r}
+conditions <- unique(as.character(dfiltered_sep$stimuli))
+subs <- unique(as.character(dfiltered_sep$Sub.Num))
+
+for (j in 1:length(subs)) {
+  sid <- as.character(subs[j]) 
+  dat <- as.data.frame(filter(dfiltered_sep, Sub.Num == sid))
+  condition_type <- unique(as.character(dat$stimuli))
+  hearing_status <- unique(as.character(dat$hearing_status_participant))
+  age <- unique(as.character(dat$Months))
+  # fit ddm for each participant 
+  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+               dat=select(dat, c(q, resp)), method="Nelder-Mead")
+  pars <- c(opt$par, condition_type, hearing_status, age, sid)
+  filteredpars_sep[j,] <- pars
+} 
+```
+
+Density graph
+```{r, fig.width=8, fig.height=6}
+
+# formatting data
+filteredpars_sep$Separation <- as.numeric(filteredpars_sep$Separation)
+filteredpars_sep$Non.Decision <- as.numeric(filteredpars_sep$Non.Decision)
+filteredpars_sep$Bias <- as.numeric(filteredpars_sep$Bias)
+filteredpars_sep$Drift <- as.numeric(filteredpars_sep$Drift)
+filteredpars_sep$Age.Months <- as.numeric(filteredpars_sep$Age.Months)
+
+filteredpars_sep <- filteredpars_sep %>%
+  # remove outliers so that they don't have a huge impact
+  group_by(Condition) %>%
+  filter(Separation < mean(Separation) + 3 * sd(Separation),
+         Separation > mean(Separation) - 3 * sd(Separation)) %>%
+  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
+         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+  filter(Bias < mean(Bias) + 3 * sd(Bias),
+         Bias > mean(Bias) - 3 * sd(Bias)) %>%
+  filter(Drift < mean(Drift) + 3 * sd(Drift),
+         Drift > mean(Drift) - 3 * sd(Drift)) %>%
+  ungroup() %>%
+  na.omit()
+
+filteredpars_sep %<>% gather(Param, Value, Separation:Drift)
+
+# actual graph
+ggplot(aes(x = Value, fill = Condition), 
+       data = filter(filteredpars_sep, Param %in% c("Drift", "Separation"))) +
+  geom_density(alpha = 0.7, adjust = 1.5) + 
+  facet_grid(.~Param, scales = "free") +
+  scale_fill_solarized()
+```
+
+Boundary separation is still higher in the ASL condition and surprisingly so is the drift. Furthermore, a surprising number of trials in the Face condition have zero or even negative drift, which doesn't make sense.
+
+Bargraph:
+```{r}
+filteredpars_sep.ms <- filteredpars_sep %>%
+  group_by(Condition, Param) %>%
+  multi_boot_standard(column = "Value", empirical_function = "mean")
+
+filteredpars_sep.ms$Condition <- factor(filteredpars_sep.ms$Condition, 
+                                levels = c("ASL", "Face"))
+
+filteredpars_sep.ms$language_modality <- ifelse(filteredpars_sep.ms$Condition == "ASL", "ASL", "English")
+
+ggplot(aes(x = Condition, y = mean, fill = language_modality), 
+       data = filter(filteredpars_sep.ms, Param %in% c("Drift", "Separation"))) +
+  geom_bar(stat = "identity") + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  facet_wrap(~Param, ncol = 4) +
+  scale_fill_solarized() + 
+  ylab("Mean Param Value") +
+  guides(fill = F) +
+  theme(text = element_text(size = 30))
+```
+
+Here we can see even more clearly that there's something strange going on with the drift in the Face condition when we use that cutoff. The question going forward is why. Drift should go up when fast guesses are removed because only subjects that are actually waiting long enough to gather information and make a decision are included.
+
+The average accuracy of subjects in the Face condition included in the Drift Diffusion Model after the EWMA cutoff is:
+```{r}
+filteredavgs_Face <- df %>%
+  filter(age_code == "child", is.na(RT) == F,
+         stimuli == "Face", RT >= Facecut['cutoff']) %>%
+  summarize(avg = mean(correct, na.rm=T))
+print(filteredavgs_Face$avg)
+```
+Not that much lower than the average accuracy of subjects in the ASL condition after the EWMA cutoff:
+```{r}
+filteredavgs_ASL <- df %>%
+  filter(age_code == "child", is.na(RT) == F,
+         stimuli == "ASL", RT >= ASLcut['cutoff']) %>%
+  summarize(avg = mean(correct, na.rm=T))
+print(filteredavgs_ASL$avg)
+```
+
+This indicates that there's something else going on in fitting parameters to the Drift Diffusion Model for the Face condition. As illustrated by the EWMA graph for the Face condition, mean accuracy drastically decreases for much later reaction times. It may be that some subjects who don't understand the question or are otherwise distracted are responding late and just guessing when they do.
+```{r}
+ewma_graph(Facecut)
+```
+
+The next step is to cut off responses past different points and see what cutoff point for late responses produces the most reasonable results.

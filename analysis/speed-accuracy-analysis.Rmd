@@ -184,7 +184,7 @@ ggplot(aes(x = as.factor(correct), y = median, fill = as.factor(correct)),
   guides(fill = F) + 
   theme(text = element_text(size=18)) +
   xlab("Response Type") +
-  ylab("Mean RT") +
+  ylab("Median RT") +
   coord_flip()
 ```
 
@@ -449,6 +449,7 @@ for (j in 1:length(subs)) {
 
 This plot shows the mean parameter values & 95% C.I.s for each stimuli type
 
+Cleaning up data and removing outliers
 ```{r plotpars, fig.width=8, fig.height=6}
 sub.pars$Separation <- as.numeric(sub.pars$Separation)
 sub.pars$Non.Decision <- as.numeric(sub.pars$Non.Decision)
@@ -503,6 +504,14 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
   ylab("Mean Param Value") +
   guides(fill = F) +
   theme(text = element_text(size = 30)) 
+```
+
+Boxplot (calculates means and CIs on its own)
+```{r}
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(sub.pars, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
 ```
 
 ## model parameter values
@@ -1077,9 +1086,6 @@ Face_ewma <- filter(ewma_data, stimuli == "Face")
  # Bullseye run separately
 Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
 Bullcut <- ewma(Bull_ewma)
-
-## TODO - remove slow responses ie. after 2000 ms
-## TODO - replace bargraphs with boxplots
 ```
 
 Average accuracy for all conditions past cutoff
@@ -1111,10 +1117,12 @@ filteredavgs_all <- df %>%
 
 ## Off the shelf DDM Filtered based on EWMA
 
-Just ASL and Face conditions by their respective cutoffs
+### Just ASL and Face conditions by their respective cutoffs
 ```{r estpars}
-dfiltered <- filter(d, (stimuli == "ASL" & q >= ASLcut['cutoff'])
-                    | (stimuli == "Face" & q >= Facecut['cutoff']))
+ASLcut_sec <- as.numeric(ASLcut['cutoff'])
+Facecut_sec <- as.numeric(Facecut['cutoff'])
+dfiltered <- filter(d, (stimuli == "ASL" & q >= ASLcut_sec)
+                    | (stimuli == "Face" & q >= Facecut_sec))
 filteredpars <- sub.pars
 conditions <- unique(as.character(dfiltered$stimuli))
 subs <- unique(as.character(dfiltered$Sub.Num))
@@ -1131,8 +1139,6 @@ for (j in 1:length(subs)) {
   pars <- c(opt$par, condition_type, hearing_status, age, sid)
   filteredpars[j,] <- pars
 } 
-
-## TODO - vary Face cutoff and see how drift changes
 ```
 
 Graphed:
@@ -1191,9 +1197,18 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
   theme(text = element_text(size = 30))
 ```
 
-ASL and Face by their combined cutoff
+Boxplot
 ```{r}
-dfiltered_ASLFace <- filter(d, stimuli == "ASL" | stimuli == "Face", q >= ASLFacecut['cutoff'])
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(filteredpars, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
+```
+
+### ASL and Face by their combined cutoff
+```{r}
+ASLFacecut_sec <- as.numeric(ASLFacecut['cutoff'])
+dfiltered_ASLFace <- filter(d, stimuli == "ASL" | stimuli == "Face", q >= ASLFacecut_sec)
 filteredpars_ASLFace <- sub.pars
 conditions <- unique(as.character(dfiltered_ASLFace$stimuli))
 subs <- unique(as.character(dfiltered_ASLFace$Sub.Num))
@@ -1274,8 +1289,15 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
   theme(text = element_text(size = 30))
 ```
 
+Boxplot
+```{r}
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(filteredpars_ASLFace, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
+```
 
-All conditions cut based on the overall cutoff
+### All conditions cut based on the overall cutoff
 ```{r estpars}
 dfiltered_all <- filter(d, q >= overallcut['cutoff'])
 filteredpars_all <-sub.pars
@@ -1352,6 +1374,13 @@ ggplot(aes(x = Condition, y = mean, fill = language_modality),
   theme(text = element_text(size = 30))
 ```
 
+Boxplot
+```{r}
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(filteredpars_all, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
+```
 
 ## Comparing accurate versus inaccurate ASL signers
 
@@ -1400,7 +1429,7 @@ timecourse$off_center <- as.numeric(off_center)
 plot <- ggplot(timecourse, aes(x = time)) + geom_line(aes(y = C_D, color = "incorrect")) + geom_line(aes(y = C_T, color = "correct")) + geom_line(aes(y = off_center, color = "off center")) + ylab("Fixation")
 plot + geom_hline(yintercept = 0, size = 1) + geom_hline(yintercept = 1, size = 1) + geom_hline(yintercept = .5, linetype = 2)
 
-## TODO - calculate area between correct and incorrect after incorrect crosses .5 for all conditions (see Yurovsky Social Reference) - make curves first
+## TODO - calculate area between correct and incorrect after incorrect crosses .5 for all conditions (see Yurovsky Social Reference) - make all curves first
 ```
 
 
@@ -1648,9 +1677,4 @@ avgdwel_correct_FaceASL <- dwel_correct %>%
   filter(stimuli == "Face" | stimuli == "ASL") %>%
   group_by(stimuli) %>%
   summarize(avg = mean(dwel))
-
-## TODO - pretty ddm/ewma results and to do
-## TODO - set up rpubs
-## TODO - pretty behavioral analyses (timecourse plots and the like)
-## TODO - look into purrr for more abstract coding
 ```

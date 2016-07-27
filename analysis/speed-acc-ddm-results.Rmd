@@ -510,9 +510,9 @@ filteredavgs_ASL <- df %>%
 print(filteredavgs_ASL$avg)
 ```
 
-This indicates that there's something else going on in fitting parameters to the Drift Diffusion Model for the Face condition. As illustrated by the EWMA graph for the Face condition, mean accuracy drastically decreases for much later reaction times. It may be that some subjects who don't understand the question or are otherwise distracted are responding late and just guessing when they do.
+This indicates that there's something else going on in fitting parameters to the Drift Diffusion Model for the Face condition. As illustrated by the EWMA graph for the Face condition, mean accuracy drastically decreases for much later reaction times. It may be that some subjects who don't understand the question or are otherwise distracted are responding late and just guessing when they do. A few individuals could be dragging down the average drift.
 ```{r}
 ewma_graph(Facecut)
 ```
 
-The next step is to cut off responses past different points and see what cutoff point for late responses produces the most reasonable results.
+The next step is to cut off responses before and after different points to see what cutoff points for early and late responses produce the most reasonable results.

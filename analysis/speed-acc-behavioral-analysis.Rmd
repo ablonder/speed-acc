@@ -1,0 +1,226 @@
+---
+title: "Behavioral Analyses"
+author: "Aviva Blonder"
+date: "July 26, 2016"
+output: html_document
+---
+
+```{r chunk_options, echo = F, include = F}
+# Set up!
+
+rm(list=ls()) # code to clear workspace
+
+knitr::opts_chunk$set(warning=F, message=F, sanitize = T, 
+                      fig.height=5, fig.width=8, echo=T, cache = T)
+knitr::opts_knit$set(root.dir = "/home/gryfalconess/Documents/CSLI/speed-acc")
+
+set.seed(0) # to reproduce simulations
+
+library(langcog)
+library(magrittr)
+library(RWiener)
+library(stringr)
+library(GGally)
+library(kmr)
+library(lme4)
+library(lsr)
+library(plyr)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stats)
+library(gridExtra)
+theme_set(theme_bw()) # set the ggplot theme that we think is pretty
+setwd("/home/gryfalconess/Documents/CSLI/speed-acc")
+```
+
+Reading in and minimal formatting of reaction time and accuracy data
+```{r}
+df <- read.csv("data/3_final_merged_data/speed-acc-ss-df.csv", 
+               check.names=F, stringsAsFactors=F) 
+
+df %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
+                          ifelse(stimuli == "Trio", "Object", 
+                                 ifelse(stimuli == "Bull", "Bullseye",
+                                        stimuli))),
+         stimuli = factor(stimuli, levels = c("ASL", "Face", "Object", "Bullseye")))
+```
+
+# Mean Accuracy
+
+Calculating the proportion correct in each condition
+```{r}
+ss_prop <- df %>% 
+  group_by(Sub.Num, age_code, Months, language_modality, 
+           stimuli, hearing_status_participant) %>% 
+  filter(trial_type != "no_shift") %>% 
+  summarise(mean_correct = mean(correct))
+
+ss_prop <- df %>% 
+  group_by(Sub.Num, age_code, Months, language_modality, stimuli, correct, 
+           hearing_status_participant) %>%
+  filter(trial_type != "no_shift") %>% 
+  summarise(mean_rt = mean(RT)) %>% 
+  left_join(ss_prop)
+```
+
+Plot.
+```{r}
+ms <- ss_prop %>%
+  filter(age_code == "child", correct == 1) %>%
+  group_by(language_modality, age_code, stimuli) %>% 
+  multi_boot_standard(column = "mean_correct") 
+
+ggplot(aes(x = stimuli, y = mean, fill = language_modality), data = ms) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper),  
+                 position = position_dodge(width = 0.9)) +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  xlab(NULL) +
+  ylab("Mean Accuracy") +
+  scale_fill_solarized() +
+  theme(text = element_text(size=30)) +
+  guides(fill = F) +
+  ggtitle("Accuracy")
+```
+
+Subjects in the ASL condition were most accurate, followed by Face. Subjects in the Object and Bullseye conditions were at chance, suggesting that their first saccade was a guess or otherwise random.
+
+# Median Reaction Time by Accuracy
+
+Calculating median reaction times for each condition
+```{r}
+ms_rt <- ss_prop %>%
+  filter(age_code == "child") %>% 
+  group_by(language_modality, age_code, stimuli, correct) %>% 
+  multi_boot_standard(column = "mean_rt", na.rm = T, empirical_function = "median")
+```
+
+Plot.
+```{r}
+ms_rt$stimuli <- factor(ms_rt$stimuli, levels = c("Bullseye", "Object", "Face", "ASL"))
+
+ggplot(aes(x = as.factor(correct), y = median, fill = as.factor(correct)), 
+       data = ms_rt) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position = position_dodge(width = 0.9)) +
+  facet_grid(stimuli~age_code) +
+  scale_fill_solarized() +
+  guides(fill = F) + 
+  theme(text = element_text(size=18)) +
+  xlab("Response Type") +
+  ylab("Median RT") +
+  coord_flip()
+```
+
+Subjects in the ASL condition may have been the most accurate, but they also took the longest, suggesting that they prioritize accuracy over speed. Both reaction time and accuracy were lower for Face and even lower for Object and Bullseye. This correspondance suggests that there's a tradeoff between speed and accuracy. However, In each condition, correct responses barely seem to take longer.
+
+# Proportion Correct Over Time
+
+If there is a tradeoff between speed and accuracy, there should be an increase in accuracy over time (possibly followed by a decrease, which would limit the difference in average reaction time by accuracy).
+
+## Evenly Spaced Bins over Reaction Time
+
+```{r}
+rt_range <- 3000
+n_bins <- 10
+break_seq <- seq(0, rt_range, rt_range/n_bins)
+
+timeslice_range <- df %>%
+  filter(age_code == "child", is.na(RT_sec) == F) %>%
+  mutate(RT_bin = cut(RT, breaks = break_seq)) %>%
+  group_by(RT_bin, stimuli) %>%
+  mutate(RT_bin_avg = mean(RT, na.rm = T))
+
+count_range <- timeslice_range %>%
+  group_by(RT_bin, stimuli) %>%
+  summarise(subjcount = n_distinct(Sub.Num), totalcount = n())
+
+timeslice_range <- timeslice_range %>%
+  group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
+  summarise(ss_acc = mean(correct, na.rm=T)) %>% 
+  group_by(RT_bin_avg, stimuli) %>%
+  summarise(mean = mean(ss_acc),
+            n = n())
+
+ggplot(aes(x=RT_bin_avg, y=mean, weight = n, 
+           color = stimuli, group = stimuli), 
+       data = timeslice_range) + 
+  geom_point(aes(size = n)) +
+  geom_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE) +
+  scale_color_solarized() +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  xlab("Average RT") +
+  ylab("Proportion Correct")
+```
+
+There is a clear tradeoff between speed and accuracy, in all conditions accuracy increases over time. In the ASL, Face, and Object conditions, accuracy then decreases after a time, possibly explaining that lack of a difference between average accurate and inaccurate reaction times.
+More subjects in the ASL condition responded later and even those that did were more accurate.
+However, this is not the clearest picture of the data, even when smoothed and weighted by number of individuals in each bin, bins with very few subjects have a strong influence on the curve.
+
+## Quantiles
+
+Plotted by Average Reaction Time in Each Quantile
+```{r}
+timeslices_avg <- df %>%
+  filter(age_code == "child", is.na(RT_sec) == F) %>%
+  group_by(stimuli) %>%
+  mutate(RT_binned = cut(RT_sec, breaks = 10),
+         RT_binned_q = lsr::quantileCut(RT_sec, 10)) %>%
+  group_by(stimuli, RT_binned_q) %>%
+  mutate(RT_bin_avg = mean(RT, na.rm = T))
+count_avg <- timeslices_avg %>%
+  group_by(RT_binned_q, stimuli) %>%
+  summarise(subjcount = n_distinct(Sub.Num), totalcount = n())
+timeslices_avg <- timeslices_avg %>%
+  group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
+  summarise(ss_acc = mean(correct, na.rm=T)) %>%
+  group_by(RT_bin_avg, stimuli) %>% 
+  multi_boot_standard("ss_acc")
+
+ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli), 
+       data = timeslices_avg) + 
+  geom_point() +
+  geom_line() +
+  scale_color_solarized() +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  xlab("Average RT") +
+  ylab("Proportion Correct") 
+```
+
+In the ASL, Face, and Bullseye conditions there is the same pattern of an increase in accuracy followed by a decrease, further illustrating the apparent tradeoff between speed and accuracy - up to a point.
+In the Object condition, accuracy barely gets above chance for any reaction time, suggesting that the subjects' initial saccades are not really an attempt to complete the task. The Bullseye condition follows the same pattern as ASL ad Face, but the spike in accuracy is earlier and only lasts for two quantiles, suggesting that it might be a fluke caused by the small number of subjects in each quantile bin, and that in fact the initial saccades of subjects in the Bullseye condition are just as meaningful as those in the Object contion.
+
+### Quartiles
+
+```{r}
+timeslices_avg <- df %>%
+  filter(age_code == "child", is.na(RT_sec) == F) %>%
+  group_by(stimuli) %>%
+  mutate(RT_binned = cut(RT_sec, breaks = 4),
+         RT_binned_q = lsr::quantileCut(RT_sec, 4)) %>%
+  group_by(stimuli, RT_binned_q) %>%
+  mutate(RT_bin_avg = mean(RT, na.rm = T))
+count_avg <- timeslices_avg %>%
+  group_by(RT_binned_q, stimuli) %>%
+  summarise(subjcount = n_distinct(Sub.Num), totalcount = n())
+timeslices_avg <- timeslices_avg %>%
+  group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
+  summarise(ss_acc = mean(correct, na.rm=T)) %>%
+  group_by(RT_bin_avg, stimuli) %>% 
+  multi_boot_standard("ss_acc")
+
+ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli), 
+       data = timeslices_avg) + 
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_line() +
+  scale_color_solarized() +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  xlab("Average RT") +
+  ylab("Proportion Correct") 
+```
+
+When the number of bins is limited to four, increasing the number of trials in each bin, the Bullseye condition looks the same as the Object condition; no signal.
+In the ASL condition and especially the Face condition, there is still a sizable drop in accuracy after the initial peak. This suggests that responses after a certain point are just guessing.

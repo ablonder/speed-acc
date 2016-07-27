@@ -157,7 +157,9 @@ ggplot(aes(x=RT_bin_avg, y=mean, weight = n,
 ```
 
 There is a clear tradeoff between speed and accuracy, in all conditions accuracy increases over time. In the ASL, Face, and Object conditions, accuracy then decreases after a time, possibly explaining that lack of a difference between average accurate and inaccurate reaction times.
-More subjects in the ASL condition responded later and even those that did were more accurate.
+
+More subjects in the ASL condition responded later and even those that did were more accurate, further illustrating that they prioritize accuracy over speed.
+
 However, this is not the clearest picture of the data, even when smoothed and weighted by number of individuals in each bin, bins with very few subjects have a strong influence on the curve.
 
 ## Quantiles
@@ -191,7 +193,8 @@ ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli),
 ```
 
 In the ASL, Face, and Bullseye conditions there is the same pattern of an increase in accuracy followed by a decrease, further illustrating the apparent tradeoff between speed and accuracy - up to a point.
-In the Object condition, accuracy barely gets above chance for any reaction time, suggesting that the subjects' initial saccades are not really an attempt to complete the task. The Bullseye condition follows the same pattern as ASL ad Face, but the spike in accuracy is earlier and only lasts for two quantiles, suggesting that it might be a fluke caused by the small number of subjects in each quantile bin, and that in fact the initial saccades of subjects in the Bullseye condition are just as meaningful as those in the Object contion.
+
+In the Object condition, accuracy barely gets above chance for any reaction time, further illustratng that the subjects' initial saccades are not really an attempt to complete the task. The Bullseye condition follows the same pattern as ASL ad Face, but the spike in accuracy is earlier and only lasts for two quantiles, suggesting that it might be a fluke caused by the small number of subjects in each quantile bin, and that in fact the initial saccades of subjects in the Bullseye condition are just as meaningful as those in the Object contion as suggested by the overall mean accuracy.
 
 ### Quartiles
 
@@ -223,4 +226,5 @@ ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli),
 ```
 
 When the number of bins is limited to four, increasing the number of trials in each bin, the Bullseye condition looks the same as the Object condition; no signal.
+
 In the ASL condition and especially the Face condition, there is still a sizable drop in accuracy after the initial peak. This suggests that responses after a certain point are just guessing.

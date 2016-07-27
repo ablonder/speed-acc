@@ -5,7 +5,7 @@ date: "July 25, 2016"
 output: html_document
 ---
 
-```{r chunk_options, echo = F, include = F}
+```{r, echo = F, include = F}
 # Set up!
 
 rm(list=ls()) # code to clear workspace
@@ -180,6 +180,20 @@ Problems:
 * Higher drift in the ASL condition, suggesting that they're gathering more information, even though they're being exposed the same target word
 It looks like some of the children, especially the ones being spoken to in English, are looking around randomly before they hear the target word, which isn't really a decision process. Those trials should be filtered out in a non-arbitrary way.
 
+A boxplot conveys a little more information
+```{r}
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(sub.pars, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
+```
+
+The means are the same as in the bargraphs, but now we can also see the data that contribute to them. First, there are only 13 datapoints in the Bullseye condition and 16 in the Face condition, meaning that outliers have a particularly strong influence on the mean in those conditions.
+
+For each condition, the boundary separations are fairly evenly distributed and tightly clustered, with a few outliers here and there.
+
+The drift rates for each condition are more widely distributed, particularly in the Bullseye and Object conditions. The subjects in the Object condition are most tightly clustered around zero as compared to subjects in the ASL and Face conditions whose drift rates are clustered around one. The drift rates in the Bullseye condition are just all over the place. This reinforces the idea that the subjects in the Bullseye and Object condition aren't gathering any information, which isn't true because they are hearing the same word as subjects in the Face condition, but it is true that they're not gathering any information from the center fixation, which might explain why their initial saccades are random.
+
 # Exponentially Weighted Moving Average Filter
 
 Vandekerckhove & Tuerlinckx (2007) use an Exponentially Weighted Moving Average (EWMA) to filter reaction time and accuracy data. It is used to remove "fast guesses" that don't reflect a decision process and therefore can't be modeled by a Drift Diffusion Model.
@@ -324,29 +338,16 @@ ggplot(aes(x = Value, fill = Condition),
   scale_fill_solarized()
 ```
 
-Bargraph:
+Boxplot
 ```{r}
-filteredpars_all.ms <- filteredpars_all %>%
-  group_by(Condition, Param) %>%
-  multi_boot_standard(column = "Value", empirical_function = "mean")
-
-filteredpars_all.ms$Condition <- factor(filteredpars_all.ms$Condition, 
-                                levels = c("ASL", "Face", "Object", "Bullseye"))
-
-filteredpars_all.ms$language_modality <- ifelse(filteredpars_all.ms$Condition == "ASL", "ASL", "English")
-
-ggplot(aes(x = Condition, y = mean, fill = language_modality), 
-       data = filter(filteredpars_all.ms, Param %in% c("Drift", "Separation"))) +
-  geom_bar(stat = "identity") + 
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  facet_wrap(~Param, ncol = 4) +
-  scale_fill_solarized() + 
-  ylab("Mean Param Value") +
-  guides(fill = F) +
-  theme(text = element_text(size = 20))
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(filteredpars_all, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
 ```
 
-This tells us pretty much the same thing as before. Drift is still higher in the ASL condition and is not significantly different from 0 in the Object and Bullseye conditions.
+This tells us pretty much the same thing as before. Mean drift is still higher in the ASL condition and around 0 in the Object and Bullseye conditions, if skewed a little higher. However, now there are more outliers, especially in the Object condiiton. Also, more subjects in the Face condition seem to have lower drift rates, which seems counterintuitive after early guesses, which are supposed to be more likely to be wrong than correct answers, were removed.
+
 
 ## Separate EWMA Filters (by condtion)
 
@@ -469,29 +470,16 @@ ggplot(aes(x = Value, fill = Condition),
 
 Boundary separation is still higher in the ASL condition and surprisingly so is the drift. Furthermore, a surprising number of trials in the Face condition have zero or even negative drift, which doesn't make sense.
 
-Bargraph:
+Boxplot
 ```{r}
-filteredpars_sep.ms <- filteredpars_sep %>%
-  group_by(Condition, Param) %>%
-  multi_boot_standard(column = "Value", empirical_function = "mean")
-
-filteredpars_sep.ms$Condition <- factor(filteredpars_sep.ms$Condition, 
-                                levels = c("ASL", "Face"))
-
-filteredpars_sep.ms$language_modality <- ifelse(filteredpars_sep.ms$Condition == "ASL", "ASL", "English")
-
-ggplot(aes(x = Condition, y = mean, fill = language_modality), 
-       data = filter(filteredpars_sep.ms, Param %in% c("Drift", "Separation"))) +
-  geom_bar(stat = "identity") + 
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  facet_wrap(~Param, ncol = 4) +
-  scale_fill_solarized() + 
-  ylab("Mean Param Value") +
-  guides(fill = F) +
-  theme(text = element_text(size = 30))
+ggplot(aes(x = Condition, y = Value), 
+       data = filter(filteredpars_sep, Param %in% c("Drift", "Separation"))) +
+  geom_boxplot() + geom_jitter(width = .1) + 
+  facet_wrap(~Param, ncol = 4)
 ```
 
-Here we can see even more clearly that there's something strange going on with the drift in the Face condition when we use that cutoff. The question going forward is why. Drift should go up when fast guesses are removed because only subjects that are actually waiting long enough to gather information and make a decision are included.
+Here we can see even more clearly that there's something strange going on with the drift in the Face condition when we use that cutoff. There are a few outliers, in particular a couple of low ones that are probably dragging down the mean a bit. However, not looking at the outliers, most of the data points are clustered around zero, including a cluster of a few below.
+The question going forward is why. Drift should go up when fast guesses are removed because only subjects that are actually waiting long enough to gather information and make a decision are included.
 
 The average accuracy of subjects in the Face condition included in the Drift Diffusion Model after the EWMA cutoff is:
 ```{r}

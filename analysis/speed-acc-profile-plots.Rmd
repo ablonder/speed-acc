@@ -1,88 +1,47 @@
+---
+title: "Speed-Accuracy Timecourse Plots"
+author: "Kyle MacDonald"
+date: "July, 12 2016"
+output: html_document
+---
 
-### Plot RTs
+```{r chunk_options, echo = F}
+rm(list=ls()) # code to clear workspace
 
-```{r}
-ms$mean_rt_all_group[2] <- 987
+knitr::opts_chunk$set(warning=F, message=F, sanitize = T, 
+                      fig.height=5, fig.width=8, echo=T, cache = T)
+
+
+# devtools::install_github("langcog/langcog")
+library(langcog)
+library(magrittr)
+library(RWiener)
+library(stringr)
+library(GGally)
+library(kmr)
+library(lme4)
+library(lsr)
+library(plyr)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+theme_set(theme_bw()) # set the ggplot theme that we think is pretty
 ```
 
-```{r}
-a <- qplot(x = factor(language_modality, levels = c("English", "ASL")), y = mean_rt_all_group, 
-           fill = language_modality,
-           data = ms,
-           geom = "bar", stat = "identity", 
-           position = "dodge") + 
-    geom_linerange(aes(ymin = mean_rt_all_group - ci_l_all, ymax = mean_rt_all_group + ci_h_all)) +
-    scale_fill_brewer(type = "qual", palette = "Set1") +
-    ylim(0, 1300) +
-    guides(fill=F) +
-    ylab("Mean Reaction Time") +
-    xlab("") + 
-    ggtitle("Reaction Time") + 
-    coord_flip() + 
-    theme(plot.title = element_text(face = "bold", size = 20),
-          axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
-```
+## Load data
 
-### Summarize First Shift Accuracy 
+```{r load and clean up data}
+d <- read.csv("../data/3_final_merged_data/speed-acc-cleaned-iChart.csv", 
+              stringsAsFactors = F)
 
-```{r}
-ms_fs <- ss %>% 
-    filter(age_code == "child") %>% 
-    group_by(language_modality) %>% 
-    summarise(m_fs = mean(C_T_prop),
-              ci.h_ct = ci.high(C_T_prop),
-              ci.l_ct = ci.low(C_T_prop))
-```
+d %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
+                               ifelse(stimuli == "Trio", "Object", 
+                                      ifelse(stimuli == "Bull", "Bullseye",
+                                             stimuli))),
+              stimuli = factor(stimuli, levels = c("ASL", "Face", "Object", "Bullseye")))
 
-```{r}
-ss_t_test <- ss %>% 
-    filter(age_code == "child") %>% 
-    select(Sub.Num, language_modality, C_T_prop) %>% 
-    unique()
-
-t.test(C_T_prop ~ language_modality, data = filter(ss, age_code == "child"), paired = F, var.equal = T)
-```
-
-```{r}
-b <- qplot(x = language_modality, y = m_fs, fill = language_modality,
-           data = ms_fs, 
-           geom = "bar", stat = "identity", 
-           position = "dodge") + 
-    geom_linerange(aes(ymin = m_fs - ci.l_ct, ymax = m_fs + ci.h_ct)) +
-    scale_fill_brewer(type = "qual", palette = "Set1") +
-    ylim(0, 0.85) +
-    guides(fill = F) +
-    ylab("Mean FS Accuracy") +
-    xlab("") + 
-    ggtitle("First Shift Accuracy") + 
-    theme(plot.title = element_text(face = "bold", size = 20),
-          axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
-```
-
-Final plot
-
-```{r}
-gridExtra::grid.arrange(a, b, ncol = 1)
+colnames(d) <- gsub(pattern = "X", replacement = "", x = colnames(d))
 ```
 
 ## Tanenhaus plot for English vs. ASL
@@ -92,250 +51,138 @@ First, we munge the raw iChart data.
 Grab just the eye movement data and group information
 
 ```{r}
-ss_iChart <- iChart %>% 
-    select(Sub.Num, language_modality, age_code, Response, `0`:`2500`) %>% 
-    filter(Response == "D", age_code == "child") 
+ss_iChart <- d %>% 
+  select(Sub.Num, language_modality, trial_type, stimuli, age_code, Response, `0`:`3000`) %>% 
+  filter(Response == "D", age_code == "child") 
 ```
 
 Convert to long format
 
 ```{r}
 ss_iChart_long <- ss_iChart %>% 
-    gather(key = Time.ms, value = value, `0`:`2500`) %>% 
-    filter(value %in% c("0", "0.5", "1")) %>% 
-    mutate(value_cat = factor(value, labels = c("Distractor", "Signer", "Target")),
-           Time.ms_numeric = to.n(Time.ms)) 
+  gather(key = Time.ms, value = value, `0`:`3000`) %>% 
+  filter(value %in% c("0", "0.5", "1")) %>% 
+  mutate(value_cat = factor(value, labels = c("Distractor", "Signer", "Target")),
+         Time.ms_numeric = as.numeric(Time.ms)) 
 ```    
 
 Summarize for each participant - get proportion looking at each time slice
 
 ```{r}
 ms_iChart_count <- ss_iChart_long %>% 
-    group_by(Sub.Num, Time.ms, language_modality, value_cat) %>% 
-    dplyr::summarise(count = ifelse(n() == 0, 0, n())) %>% 
-    dplyr::summarise(sum_count = sum(count))
+  group_by(Sub.Num, Time.ms, language_modality, value_cat) %>% 
+  dplyr::summarise(count = ifelse(n() == 0, 0, n())) %>% 
+  dplyr::summarise(sum_count = sum(count)) %>% 
+  ungroup() %>% 
+  mutate(Sub.Num = as.character(Sub.Num))
 
-ms_iChart <- as.data.frame(xtabs(~ Sub.Num + value_cat + Time.ms, 
-                                 data = ss_iChart_long)) %>% 
-    left_join(y = ms_iChart_count, by = c("Sub.Num", "Time.ms")) %>% 
-    mutate(proportion_looking = Freq / sum_count,
-           language_modality_factor = as.factor(language_modality))
+ms_iChart <- as.data.frame(xtabs(~ Sub.Num + value_cat + Time.ms, data = ss_iChart_long),
+                           stringsAsFactors = F) %>% 
+  left_join(y = ms_iChart_count, by = c("Sub.Num", "Time.ms")) %>% 
+  mutate(proportion_looking = Freq / sum_count,
+         language_modality_factor = as.factor(language_modality))
 ```
 
 Get means and CIs for proportion looking at each time slice across particpants
 
 ```{r}
 ms_mean_iChart <- ms_iChart %>% 
-    group_by(Time.ms, language_modality, value_cat) %>% 
-    dplyr::summarise(mean_prop_looking = mean(proportion_looking, na.rm = T),
-                     ci_low = ci.low(proportion_looking),
-                     ci_high = ci.high(proportion_looking))
+  group_by(Time.ms, language_modality, value_cat) %>% 
+  multi_boot_standard(column = "proportion_looking", na.rm = T)
 ```
 
 Now we make Tanenhaus style plot.
 
 ```{r tanenhaus-plot}
-breaks <- seq(0,2500, by=500)
+breaks <- seq(0,3000, by=500)
 y_breaks <- seq(0.25,1.0, by = 0.25)
-points <- seq(0,2500, by = 200)
+points <- seq(0,3000, by = 200)
 
-ggplot(aes(x = to.n(Time.ms), y = mean_prop_looking, color = value_cat, shape = language_modality, 
+ggplot(aes(x = as.numeric(Time.ms), y = mean, 
+           color = value_cat, shape = language_modality, 
            linetype = language_modality), 
        data = ms_mean_iChart) + 
-    ylim(0,1) +
-    geom_line(data = filter(ms_mean_iChart, to.n(Time.ms) %in% points), size=0.7) +
-    geom_linerange(data = filter(ms_mean_iChart, Time.ms %in% points),
-                   aes(ymin=mean_prop_looking - ci_low, 
-                       ymax=mean_prop_looking + ci_high), alpha = 0.5) +
-    geom_point(data = filter(ms_mean_iChart, to.n(Time.ms) %in% points), size=3) +
-    scale_color_brewer(palette = "Set1", type = "qual") +
-    xlab("Time in ms from onset of noun") +
-    ylab("Proportion looking") +
-    guides(color = F, shape = F, linetype = F) +
-    theme_bw() +
-    theme(axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
+  ylim(0,1) +
+  geom_line(data = filter(ms_mean_iChart, as.numeric(Time.ms) %in% points), size=0.7) +
+  geom_linerange(data = filter(ms_mean_iChart, Time.ms %in% points),
+                 aes(ymin=ci_lower, ymax=ci_upper), alpha = 0.5) +
+  geom_point(data = filter(ms_mean_iChart, as.numeric(Time.ms) %in% points), size=3) +
+  scale_color_brewer(palette = "Set1", type = "qual") +
+  xlab("Time in ms from onset of noun") +
+  ylab("Proportion looking") +
+  guides(color = F, shape = F, linetype = F) +
+  theme_bw() +
+  theme(axis.title.x = element_text(colour="grey40",size=22,
+                                    angle=0,hjust=0.5,vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey40",size=22,
+                                    angle=90,hjust=0.5,vjust=0.5,face="plain"),
+        axis.text.x = element_text(colour="grey20",size=18,
+                                   angle=0,hjust=0.5,vjust=0,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=18,
+                                   angle=0,hjust=0.5,vjust=0,face="plain"),
+        plot.margin = unit(c(0.5,2,1,1), "cm"),
+        strip.text.x = element_text(size = 18),
+        panel.margin = unit(1, "lines"))
 ```
 
-## Speed accuracy tradeoff: hearing status
-
-### Summarize RTs 
-
-```{r}
-ms_hs <- ss %>% 
-    filter(language_modality == "ASL", age_code == "child") %>% 
-    group_by(age_code, trial_types, hearing_status_participant) %>% 
-    summarise(mean_rt_group = mean(mean_rt),
-              ci_h_correct = ci.high(mean_rt),
-              ci_l_correct = ci.low(mean_rt),
-              mean_rt_all_group = mean(mean_rt_all, na.rm = T),
-              ci_h_all = ci.high(mean_rt_all),
-              ci_l_all = ci.low(mean_rt_all))
-```
-
-### Plot RTs
-
-```{r}
-qplot(x = hearing_status_participant, y = mean_rt_all_group, 
-      fill = hearing_status_participant,
-      data = filter(ms_hs, age_code == "child", trial_types == "C_T"), 
-      geom = "bar", stat = "identity", 
-      position = "dodge") + 
-    geom_linerange(aes(ymin = mean_rt_all_group - ci_l_all, ymax = mean_rt_all_group + ci_h_all)) +
-    scale_fill_brewer(type = "qual", palette = "Set1") +
-    ylim(0, 1300) +
-    guides(fill=F) +
-    ylab("Mean Reaction Time") +
-    xlab("") + 
-    ggtitle("Reaction Time") + 
-    coord_flip() + 
-    theme(plot.title = element_text(face = "bold", size = 20),
-          axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
-```
-
-### Summarize First Shift Accuracy 
-
-```{r}
-ms_fs <- ss %>% 
-    filter(age_code == "child") %>% 
-    group_by(language_modality) %>% 
-    summarise(m_fs = mean(C_T_prop),
-              ci.h_ct = ci.high(C_T_prop),
-              ci.l_ct = ci.low(C_T_prop))
-```
-
-```{r}
-t.test(C_T_prop ~ language_modality, data = filter(ss, age_code == "child"), paired = F)
-```
-
-```{r}
-b <- qplot(x = language_modality, y = m_fs, fill = language_modality,
-           data = ms_fs, 
-           geom = "bar", stat = "identity", 
-           position = "dodge") + 
-    geom_linerange(aes(ymin = m_fs - ci.l_ct, ymax = m_fs + ci.h_ct)) +
-    scale_fill_brewer(type = "qual", palette = "Set1") +
-    ylim(0, 0.8) +
-    guides(fill = F) +
-    ylab("Mean FS Accuracy") +
-    xlab("") + 
-    ggtitle("First Shift Accuracy") + 
-    theme(plot.title = element_text(face = "bold", size = 20),
-          axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
-```
-
-Final plot
-
-```{r}
-gridExtra::grid.arrange(a, b, ncol = 1)
-```
-
-## Tanenhaus plot for English vs. ASL
-
-First, we munge the raw iChart data.
-
-Grab just the eye movement data and group information
-
-```{r}
-ss_iChart <- iChart %>% 
-    select(Sub.Num, language_modality, age_code, Response, `0`:`2500`) %>% 
-    filter(Response == "D", age_code == "child") 
-```
-
-Convert to long format
-
-```{r}
-ss_iChart_long <- ss_iChart %>% 
-    gather(key = Time.ms, value = value, `0`:`2500`) %>% 
-    filter(value %in% c("0", "0.5", "1")) %>% 
-    mutate(value_cat = factor(value, labels = c("Distractor", "Signer", "Target")),
-           Time.ms_numeric = to.n(Time.ms)) 
-```    
-
-Summarize for each participant - get proportion looking at each time slice
+## Same plot but separate by stimuli
 
 ```{r}
 ms_iChart_count <- ss_iChart_long %>% 
-    group_by(Sub.Num, Time.ms, language_modality, value_cat) %>% 
-    dplyr::summarise(count = ifelse(n() == 0, 0, n())) %>% 
-    dplyr::summarise(sum_count = sum(count))
+  group_by(Sub.Num, Time.ms, stimuli, value_cat) %>% 
+  dplyr::summarise(count = ifelse(n() == 0, 0, n())) %>% 
+  dplyr::summarise(sum_count = sum(count)) %>% 
+  ungroup() %>% 
+  mutate(Sub.Num = as.character(Sub.Num))
 
-ms_iChart <- as.data.frame(xtabs(~ Sub.Num + value_cat + Time.ms, 
-                                 data = ss_iChart_long)) %>% 
-    left_join(y = ms_iChart_count, by = c("Sub.Num", "Time.ms")) %>% 
-    mutate(proportion_looking = Freq / sum_count,
-           language_modality_factor = as.factor(language_modality))
-```
+ms_iChart <- as.data.frame(xtabs(~ Sub.Num + value_cat + Time.ms, data = ss_iChart_long),
+                           stringsAsFactors = F) %>% 
+  left_join(y = ms_iChart_count, by = c("Sub.Num", "Time.ms")) %>% 
+  mutate(proportion_looking = Freq / sum_count,
+         stimuli_factor = as.factor(stimuli))
 
-Get means and CIs for proportion looking at each time slice across particpants
-
-```{r}
 ms_mean_iChart <- ms_iChart %>% 
-    group_by(Time.ms, language_modality, value_cat) %>% 
-    dplyr::summarise(mean_prop_looking = mean(proportion_looking, na.rm = T),
-                     ci_low = ci.low(proportion_looking),
-                     ci_high = ci.high(proportion_looking))
+  group_by(Time.ms, stimuli, value_cat) %>% 
+  multi_boot_standard(column = "proportion_looking", na.rm = T) %>% 
+  filter(is.na(stimuli) == F)
 ```
 
-Now we make Tanenhaus style plot.
-
-```{r tanenhaus-plot}
-breaks <- seq(0,2500, by=500)
+```{r tanenhaus-plot 2}
+breaks <- seq(0,3000, by=500)
 y_breaks <- seq(0.25,1.0, by = 0.25)
-points <- seq(0,2500, by = 200)
+points <- seq(0,3000, by = 200)
 
-ggplot(aes(x = to.n(Time.ms), y = mean_prop_looking, color = value_cat, shape = language_modality, 
-           linetype = language_modality), 
+# change factor levels for plot to help compare conditions of interest
+ms_mean_iChart$stimuli <- factor(ms_mean_iChart$stimuli, 
+                                 levels = c("ASL", "Object", "Face", "Bullseye"))
+
+ggplot(aes(x = as.numeric(Time.ms), y = mean, 
+           color = value_cat), 
        data = ms_mean_iChart) + 
-    ylim(0,1) +
-    geom_line(data = filter(ms_mean_iChart, to.n(Time.ms) %in% points), size=0.7) +
-    geom_linerange(data = filter(ms_mean_iChart, Time.ms %in% points),
-                   aes(ymin=mean_prop_looking - ci_low, 
-                       ymax=mean_prop_looking + ci_high), alpha = 0.5) +
-    geom_point(data = filter(ms_mean_iChart, to.n(Time.ms) %in% points), size=3) +
-    scale_color_brewer(palette = "Set1", type = "qual") +
-    xlab("Time in ms from onset of noun") +
-    ylab("Proportion looking") +
-    guides(color = F, shape = F, linetype = F) +
-    theme_bw() +
-    theme(axis.title.x = element_text(colour="grey40",size=22,
-                                      angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.title.y = element_text(colour="grey40",size=22,
-                                      angle=90,hjust=0.5,vjust=0.5,face="plain"),
-          axis.text.x = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          axis.text.y = element_text(colour="grey20",size=18,
-                                     angle=0,hjust=0.5,vjust=0,face="plain"),
-          plot.margin = unit(c(0.5,2,1,1), "cm"),
-          strip.text.x = element_text(size = 18),
-          panel.margin = unit(1, "lines"))
+  ylim(0,1) +
+  geom_line(data = filter(ms_mean_iChart, as.numeric(Time.ms) %in% points), size=0.7) +
+  geom_linerange(data = filter(ms_mean_iChart, Time.ms %in% points),
+                 aes(ymin=ci_lower, ymax=ci_upper), alpha = 0.5) +
+  geom_point(data = filter(ms_mean_iChart, as.numeric(Time.ms) %in% points), size=2) +
+  scale_color_brewer(palette = "Set1", type = "qual") +
+  xlab("Time in ms from onset of noun") +
+  ylab("Proportion looking") +
+  guides(color = F, shape = F, linetype = F) +
+  theme_bw() +
+  facet_wrap(~stimuli, ncol = 2) +
+  theme(axis.title.x = element_text(colour="grey40",size=18,
+                                    angle=0,hjust=0.5,vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey40",size=18,
+                                    angle=90,hjust=0.5,vjust=0.5,face="plain"),
+        axis.text.x = element_text(colour="grey20",size=12,
+                                   angle=0,hjust=0.5,vjust=0,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=12,
+                                   angle=0,hjust=0.5,vjust=0,face="plain"),
+        plot.margin = unit(c(0.5,2,1,1), "cm"),
+        strip.text.x = element_text(size = 16),
+        panel.margin = unit(1, "lines"))
 ```
+
+## Timecourse plot split by trial type (C-T vs. C-D)
+
+Goal: plot different curves for correct and incorrect shifting trials.

@@ -20,7 +20,8 @@ rm(list=ls()) # code to clear workspace
 knitr::opts_chunk$set(warning=F, message=F, sanitize = T, 
                       fig.height=5, fig.width=8, echo=T, cache = T)
 
-set.seed(0) # to reproduce simulations
+# to reproduce simulations
+set.seed(0) 
 
 # devtools::install_github("langcog/langcog")
 library(langcog)
@@ -37,16 +38,14 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 theme_set(theme_bw()) # set the ggplot theme that we think is pretty
-setwd("/home/gryfalconess/Documents/CSLI/speed-acc")
 ```
-
 
 ## Read Data
 
 Eye movement data
 
 ```{r}
-df <- read.csv("data/3_final_merged_data/speed-acc-ss-df.csv", 
+df <- read.csv("../data/3_final_merged_data/speed-acc-ss-df.csv", 
                check.names=F, stringsAsFactors=F) 
 
 df %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
@@ -107,21 +106,39 @@ ss_prop <- df %>%
 
 Plot.
 
-```{r}
+```{r boxplot}
+ggplot(aes(x = stimuli, y = mean_correct, fill = language_modality), 
+       data = filter(ss_prop, age_code == "child", correct == 1)) +
+  geom_boxplot(outlier.colour = "red") +
+  geom_jitter(width = 0.2, alpha = 0.35) +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  ylim(0,1) +
+  xlab(NULL) +
+  ylab("Mean Accuracy") +
+  scale_fill_solarized() +
+  theme(text = element_text(size=20)) +
+  guides(fill = F) +
+  ggtitle("Accuracy")
+
+```
+
+```{r bar graph}
 ms <- ss_prop %>%
-  filter(age_code == "child", correct == 1) %>%
+  ungroup() %>% 
+  filter(age_code == "child") %>%
+  select(language_modality, age_code, stimuli, Sub.Num, mean_correct) %>% 
+  distinct() %>% 
   group_by(language_modality, age_code, stimuli) %>% 
   multi_boot_standard(column = "mean_correct") 
 
 ggplot(aes(x = stimuli, y = mean, fill = language_modality), data = ms) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper),  
-                 position = position_dodge(width = 0.9)) +
+  geom_bar(stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
   geom_hline(yintercept = 0.5, lty = "dashed") +
   xlab(NULL) +
   ylab("Mean Accuracy") +
   scale_fill_solarized() +
-  theme(text = element_text(size=36)) +
+  theme(text = element_text(size=20)) +
   guides(fill = F) +
   ggtitle("Accuracy")
 ```
@@ -165,6 +182,24 @@ ggplot(aes(x = stimuli, y = median, fill = language_modality),
   scale_fill_solarized() +
   guides(fill = F) + 
   theme(text = element_text(size=36)) +
+  xlab(NULL) +
+  ylab("Median RT") +
+  coord_flip() +
+  ggtitle("Reaction Time")
+```
+
+RT boxplot
+
+```{r rt boxplot}
+ss_prop$stimuli <- factor(ss_prop$stimuli, levels = c("Bullseye", "Object", "Face", "ASL"))
+
+ggplot(aes(x = stimuli, y = mean_rt, fill = language_modality), 
+       data = filter(ss_prop, age_code == "child", correct == 1)) + 
+  geom_boxplot(outlier.colour = "red") +
+  geom_jitter(width = 0.4, alpha = 0.35) +
+  scale_fill_solarized() +
+  guides(fill = F) + 
+  theme(text = element_text(size=20)) +
   xlab(NULL) +
   ylab("Median RT") +
   coord_flip() +
@@ -699,9 +734,20 @@ ms_time_slice <- df %>%
   mutate(RT_binned = cut(RT_sec, breaks = 5),
          RT_binned_q = lsr::quantileCut(RT_sec, 5)) %>%
   group_by(RT_binned_q, stimuli, Sub.Num) %>% 
-  summarise(ss_acc = mean(correct, na.rm=T)) %>% 
+  summarise(ss_rt = mean(RT, na.rm=T)) %>% 
   group_by(RT_binned_q, stimuli) %>% 
-  multi_boot_standard("ss_acc") 
+  multi_boot_standard("ss_rt") %>% 
+  rename(mean_rt = mean, ci_lower_rt = ci_lower, ci_upper_rt = ci_upper) %>% 
+  select(mean_rt, ci_lower_rt, ci_upper_rt) %>%
+  ungroup() %>% 
+  select(-RT_binned_q) 
+
+# now bind the columns together to join with accuracy data
+ms_time_slice <- cbind(ms_time_slice_acc, ms_time_slice_rt)
+
+ms_time_slice %<>% 
+  mutate(RT_binned_q = as.character(RT_binned_q), stimuli = as.character(stimuli)) 
+
 
 ms_time_slice$RT_binned_q <- plyr::revalue(ms_time_slice$RT_binned_q, 
                                            c("(0.0301,0.233]"= "Q1", 

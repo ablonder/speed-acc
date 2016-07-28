@@ -1382,6 +1382,76 @@ ggplot(aes(x = Condition, y = Value),
   facet_wrap(~Param, ncol = 4)
 ```
 
+### Graph of cutoff versus mean drift in the Face condition
+
+This is going to take forever.
+```{r}
+Facedata <- df %>% 
+  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, stimuli == "Face") %>% 
+  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
+  mutate(resp = factor(correct),
+         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+         resp = relevel(resp, "upper")) %>% 
+  rename(q = RT_sec)
+
+#because RWiener is finicky:
+Facedata$resp <- as.character(Facedata$resp)
+startcuts <- .2
+endcuts <- 1
+interval <- .1
+cuts <- seq(startcuts, endcuts, interval)
+datalist <- list()
+drift_by_cutoff <- data.frame(cutoff = numeric(), meandrift = numeric())
+counter <- 0
+for(cutoff in cuts){
+  counter <- counter + 1
+  datalist[[counter]] <- filter(Facedata, q >= cutoff)
+  drift_by_cutoff[counter, "cutoff"] <- cutoff
+}
+
+driftcalc <- function(datalist, drift_by_cutoff){
+  sub.pars <- data.frame(Separation = numeric(),
+                         Non.Decision = numeric(),
+                         Bias = numeric(),
+                         Drift = numeric(),
+                         Condition = character(),
+                         Hearing.Status = character(),
+                         Age.Months = character(),
+                         Sub.Num = character(),
+                         stringsAsFactors = F)
+  counter <- 0
+  for(data in datalist){
+    counter <- counter+1
+    thissub.pars <- sub.pars
+    conditions <- unique(as.character(data$stimuli))
+    subs <- unique(as.character(data$Sub.Num))
+    
+    for (j in 1:length(subs)) {
+      sid <- as.character(subs[j]) 
+      dat <- as.data.frame(filter(data, Sub.Num == sid))
+      condition_type <- unique(as.character(dat$stimuli))
+      hearing_status <- unique(as.character(dat$hearing_status_participant))
+      age <- unique(as.character(dat$Months))
+      # fit ddm for each participant 
+      opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                   dat=select(dat, c(q, resp)), method="Nelder-Mead")
+      pars <- c(opt$par, condition_type, hearing_status, age, sid)
+      thissub.pars[j,] <- pars
+    }
+    
+    thissub.pars$Drift <- as.numeric(thissub.pars$Drift)
+    thisavg <- summarize(thissub.pars, mean = mean(Drift))
+    drift_by_cutoff[counter, "meandrift"] <- thisavg[1, "mean"]
+  }
+  return(drift_by_cutoff)
+}
+
+Facecut_drift <- driftcalc(datalist = datalist,
+                           drift_by_cutoff = drift_by_cutoff)
+
+ggplot(Facecut_drift, aes(y = meandrift, x = cutoff)) + geom_point()
+```
+
 ## Comparing accurate versus inaccurate ASL signers
 
 Load reaction time data

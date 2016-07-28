@@ -503,4 +503,99 @@ This indicates that there's something else going on in fitting parameters to the
 ewma_graph(Facecut)
 ```
 
-The next step is to cut off responses before and after different points to see what cutoff points for early and late responses produce the most reasonable results.
+## Alternative cutoffs
+
+The results from the different EWMA cutoffs indicate that mean drift rate varies quite a bit based on where the cutoff is. This function will enable us to run the DDM based on a range of cutoffs and compare the results.
+```{r}
+driftcalc <- function(datalist, splits){
+  drift_by_condition <- data.frame()
+  sub.pars <- data.frame(Separation = numeric(),
+                         Non.Decision = numeric(),
+                         Bias = numeric(),
+                         Drift = numeric(),
+                         Condition = character(),
+                         Hearing.Status = character(),
+                         Age.Months = character(),
+                         Sub.Num = character(),
+                         stringsAsFactors = F)
+  counter <- 0
+  for(data in datalist){
+    counter <- counter+1
+    thissub.pars <- sub.pars
+    conditions <- unique(as.character(data$stimuli))
+    subs <- unique(as.character(data$Sub.Num))
+    trialcount <- group_by(data, Sub.Num) %>%
+      summarize(n = n())
+    
+    for (j in 1:length(subs)) {
+      sid <- as.character(subs[j]) 
+      dat <- as.data.frame(filter(data, Sub.Num == sid))
+      condition_type <- unique(as.character(dat$stimuli))
+      hearing_status <- unique(as.character(dat$hearing_status_participant))
+      age <- unique(as.character(dat$Months))
+      # fit ddm for each participant 
+      opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                   dat=select(dat, c(q, resp)), method="Nelder-Mead")
+      pars <- c(opt$par, condition_type, hearing_status, age, sid)
+      thissub.pars[j,] <- pars
+    }
+    
+    thissub.pars$Drift <- as.numeric(thissub.pars$Drift)
+    thissub.pars <- mutate(thissub.pars, conditions = as.numeric(splits[counter])) %>%
+      merge(trialcount, by = "Sub.Num")
+    drift_by_condition <- rbind(drift_by_condition, select(thissub.pars, Drift, conditions, Sub.Num, n))
+  }
+  return(drift_by_condition)
+}
+```
+
+Calculating drift rates for each subject based on cutoffs every 100 ms from 200 ms to 1000 ms
+```{r}
+Facedata <- df %>% 
+  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, stimuli == "Face") %>% 
+  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
+  mutate(resp = factor(correct),
+         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+         resp = relevel(resp, "upper")) %>% 
+  rename(q = RT_sec)
+
+#because RWiener is finicky:
+Facedata$resp <- as.character(Facedata$resp)
+
+startcuts <- .2
+endcuts <- 1
+interval <- .1
+cuts <- seq(startcuts, endcuts, interval)
+datalist <- list()
+cutoffs <- list()
+counter <- 0
+for(cutoff in cuts){
+  counter <- counter + 1
+  datalist[[counter]] <- filter(Facedata, q >= cutoff)
+  cutoffs[[counter]] <- cutoff
+}
+
+Facecut_drift <- driftcalc(datalist, cutoffs)
+```
+
+Scatterplot of mean drift for each cutoff point
+```{r}
+meandrift <- Facecut_drift %>%
+  group_by(conditions) %>%
+  summarise(avgdrift = mean(Drift))
+
+ggplot(meandrift, aes(y = avgdrift, x = conditions)) + geom_point()
+```
+
+There's a huge drop off in mean when the data is cutoff at 800 ms, what's causing that?
+
+Boxplots
+```{r}
+Facecut_drift$conditions <- as.factor(Facecut_drift$conditions)
+
+ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(size = n)) + xlab("Cutoff Point")
+```
+
+It looks like there are a few subjects whose mean drift rates drop (and a few whose drift rates jump) when their earlier trials are removed. With how drastic the change is in some cases, it looks like there just isn't enough data once these cuts are made to balance outliers.
+
+We've learned what we can from what we have, going forward, it's time to collect more data.

@@ -1401,15 +1401,16 @@ endcuts <- 1
 interval <- .1
 cuts <- seq(startcuts, endcuts, interval)
 datalist <- list()
-drift_by_cutoff <- data.frame(cutoff = numeric(), meandrift = numeric())
+cutoffs <- list()
 counter <- 0
 for(cutoff in cuts){
   counter <- counter + 1
   datalist[[counter]] <- filter(Facedata, q >= cutoff)
-  drift_by_cutoff[counter, "cutoff"] <- cutoff
+  cutoffs[[counter]] <- cutoff
 }
 
-driftcalc <- function(datalist, drift_by_cutoff){
+driftcalc <- function(datalist, splits){
+  drift_by_condition <- data.frame()
   sub.pars <- data.frame(Separation = numeric(),
                          Non.Decision = numeric(),
                          Bias = numeric(),
@@ -1425,6 +1426,8 @@ driftcalc <- function(datalist, drift_by_cutoff){
     thissub.pars <- sub.pars
     conditions <- unique(as.character(data$stimuli))
     subs <- unique(as.character(data$Sub.Num))
+    trialcount <- group_by(data, Sub.Num) %>%
+      summarize(n = n())
     
     for (j in 1:length(subs)) {
       sid <- as.character(subs[j]) 
@@ -1440,16 +1443,18 @@ driftcalc <- function(datalist, drift_by_cutoff){
     }
     
     thissub.pars$Drift <- as.numeric(thissub.pars$Drift)
-    thisavg <- summarize(thissub.pars, mean = mean(Drift))
-    drift_by_cutoff[counter, "meandrift"] <- thisavg[1, "mean"]
+    thissub.pars <- mutate(thissub.pars, conditions = as.numeric(splits[counter])) %>%
+      merge(trialcount, by = "Sub.Num")
+    drift_by_condition <- rbind(drift_by_condition, select(thissub.pars, Drift, conditions, Sub.Num, n))
   }
-  return(drift_by_cutoff)
+  return(drift_by_condition)
 }
 
-Facecut_drift <- driftcalc(datalist = datalist,
-                           drift_by_cutoff = drift_by_cutoff)
+Facecut_drift <- driftcalc(datalist, cutoffs)
+Facecut_drift$Drift <- as.numeric(Facecut_drift$Drift)
+Facecut_drift$conditions <- as.factor(Facecut_drift$conditions)
 
-ggplot(Facecut_drift, aes(y = meandrift, x = cutoff)) + geom_point()
+ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(color = Sub.Num, size = n)) + xlab("Cutoff Point")
 ```
 
 ## Comparing accurate versus inaccurate ASL signers

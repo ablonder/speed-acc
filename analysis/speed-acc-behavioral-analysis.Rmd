@@ -117,6 +117,41 @@ ggplot(aes(x = as.factor(correct), y = median, fill = as.factor(correct)),
 
 Subjects in the ASL condition may have been the most accurate, but they also took the longest, suggesting that they prioritize accuracy over speed. Both reaction time and accuracy were lower for Face and even lower for Object and Bullseye. This correspondance suggests that there's a tradeoff between speed and accuracy. However, In each condition, correct responses barely seem to take longer.
 
+# Distribution of Accuracy over Reaction Time
+
+Note the RT cutoff for the long tail. When you cutoff more of the tail, the difference between median correct and inccorrect shifting increases. It's interesting to think about whether RTs in these long tails are meaningful. 
+
+```{r}
+med_all <- df %>% 
+  group_by(age_code, language_modality, stimuli, correct) %>% 
+  mutate(log_RT = log(RT)) %>% 
+  multi_boot_standard(column = "RT", na.rm = T, empirical_function = "median")
+
+med_all %<>% mutate(Response.Type = ifelse(correct == 1, "Correct", "Incorrect")) %>% 
+  mutate(Response.Type = factor(Response.Type, levels = c("Incorrect", "Correct")))
+
+df %<>% mutate(Response.Type = ifelse(correct == 1, "Correct", "Incorrect")) %>% 
+  mutate(Response.Type = factor(Response.Type, levels = c("Incorrect", "Correct")))
+
+ggplot(aes(x = RT, fill = Response.Type), 
+       data = filter(df, age_code == "child")) +
+  geom_density(alpha = 0.7, adjust = 1.5) + 
+  facet_grid(.~stimuli) +
+  geom_vline(aes(xintercept = median, color = Response.Type), size = 1, lty = "dashed", 
+             data = filter(med_all, age_code == "child")) +
+  guides(color = F) + 
+  ylab("Density") +
+  scale_fill_manual(values = c("orangered", "green3")) +
+  scale_color_manual(values = c("orangered", "green4")) +
+  theme(text = element_text(size=24),
+        legend.position = "top",
+        panel.margin = unit(2, "lines")) +
+  scale_y_continuous(breaks = c(0, .001)) +
+  scale_x_continuous(breaks = c(0, 1000, 2000))
+```
+
+Again we see evidence of a tradeoff between spped and accuracy for the ASL, Face, and maybe Bullseye conditions, but the distributions in the Object condition are right on top of each other. 
+
 # Proportion Correct Over Time
 
 If there is a tradeoff between speed and accuracy, there should be an increase in accuracy over time (possibly followed by a decrease, which would limit the difference in average reaction time by accuracy).

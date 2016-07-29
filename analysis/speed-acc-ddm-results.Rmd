@@ -525,7 +525,7 @@ driftcalc <- function(datalist, splits){
     conditions <- unique(as.character(data$stimuli))
     subs <- unique(as.character(data$Sub.Num))
     trialcount <- group_by(data, Sub.Num) %>%
-      summarize(n = n())
+      summarize(num = n())
     
     for (j in 1:length(subs)) {
       sid <- as.character(subs[j]) 
@@ -543,7 +543,7 @@ driftcalc <- function(datalist, splits){
     thissub.pars$Drift <- as.numeric(thissub.pars$Drift)
     thissub.pars <- mutate(thissub.pars, conditions = as.numeric(splits[counter])) %>%
       merge(trialcount, by = "Sub.Num")
-    drift_by_condition <- rbind(drift_by_condition, select(thissub.pars, Drift, conditions, Sub.Num, n))
+    drift_by_condition <- rbind(drift_by_condition, select(thissub.pars, Drift, conditions, Sub.Num, num))
   }
   return(drift_by_condition)
 }
@@ -593,7 +593,7 @@ Boxplots
 ```{r}
 Facecut_drift$conditions <- as.factor(Facecut_drift$conditions)
 
-ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(size = n)) + xlab("Cutoff Point")
+ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(size = num)) + xlab("Cutoff Point")
 ```
 
 It looks like there are a few subjects whose mean drift rates drop (and a few whose drift rates jump) when their earlier trials are removed. With how drastic the change is in some cases, it looks like there just isn't enough data once these cuts are made to balance outliers.

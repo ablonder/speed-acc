@@ -215,51 +215,17 @@ timeslices_avg <- timeslices_avg %>%
   group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
   summarise(ss_acc = mean(correct, na.rm=T)) %>%
   group_by(RT_bin_avg, stimuli) %>% 
-  multi_boot_standard("ss_acc")
+  summarise(mean = mean(ss_acc), n = n())
 
-ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli), 
-       data = timeslices_avg) + 
-  geom_point() +
-  geom_line() +
+ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli, weight = n), data = timeslices_avg) + 
+  geom_point(aes(size = n)) +
+  geom_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE) +
   scale_color_solarized() +
   geom_hline(yintercept = 0.5, lty = "dashed") +
   xlab("Average RT") +
   ylab("Proportion Correct") 
 ```
 
-In the ASL, Face, and Bullseye conditions there is the same pattern of an increase in accuracy followed by a decrease, further illustrating the apparent tradeoff between speed and accuracy - up to a point.
+In the ASL and Face conditions there is the same pattern of an increase in accuracy followed by a decrease, further illustrating the apparent tradeoff between speed and accuracy - up to a point. In the ASL condition and especially the Face condition, there is still a sizable drop in accuracy after the initial peak. This suggests that responses after a certain point are, similarly to early responses, just guessing.
 
-In the Object condition, accuracy barely gets above chance for any reaction time, further illustratng that the subjects' initial saccades are not really an attempt to complete the task. The Bullseye condition follows the same pattern as ASL ad Face, but the spike in accuracy is earlier and only lasts for two quantiles, suggesting that it might be a fluke caused by the small number of subjects in each quantile bin, and that in fact the initial saccades of subjects in the Bullseye condition are just as meaningful as those in the Object contion as suggested by the overall mean accuracy.
-
-### Quartiles
-
-```{r}
-timeslices_avg <- df %>%
-  filter(age_code == "child", is.na(RT_sec) == F) %>%
-  group_by(stimuli) %>%
-  mutate(RT_binned = cut(RT_sec, breaks = 4),
-         RT_binned_q = lsr::quantileCut(RT_sec, 4)) %>%
-  group_by(stimuli, RT_binned_q) %>%
-  mutate(RT_bin_avg = mean(RT, na.rm = T))
-count_avg <- timeslices_avg %>%
-  group_by(RT_binned_q, stimuli) %>%
-  summarise(subjcount = n_distinct(Sub.Num), totalcount = n())
-timeslices_avg <- timeslices_avg %>%
-  group_by(RT_bin_avg, stimuli, Sub.Num) %>% 
-  summarise(ss_acc = mean(correct, na.rm=T)) %>%
-  group_by(RT_bin_avg, stimuli) %>% 
-  multi_boot_standard("ss_acc")
-
-ggplot(aes(x=RT_bin_avg, y=mean, color = stimuli, group = stimuli), 
-       data = timeslices_avg) + 
-  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  geom_line() +
-  scale_color_solarized() +
-  geom_hline(yintercept = 0.5, lty = "dashed") +
-  xlab("Average RT") +
-  ylab("Proportion Correct") 
-```
-
-When the number of bins is limited to four, increasing the number of trials in each bin, the Bullseye condition looks the same as the Object condition; no signal.
-
-In the ASL condition and especially the Face condition, there is still a sizable drop in accuracy after the initial peak. This suggests that responses after a certain point are just guessing.
+In the Object and Bullseye conditions, accuracy barely gets above chance for any reaction time, excluding a few outliers, which could easily have happened by chance and don't factor in to the overall curve. This further illustrates that the subjects in these conditions' initial saccades are not really an attempt to complete the task.

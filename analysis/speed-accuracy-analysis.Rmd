@@ -38,6 +38,8 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 theme_set(theme_bw()) # set the ggplot theme that we think is pretty
+
+setwd("Documents/CSLI/speed-acc")
 ```
 
 ## Read Data
@@ -45,7 +47,7 @@ theme_set(theme_bw()) # set the ggplot theme that we think is pretty
 Eye movement data
 
 ```{r}
-df <- read.csv("../data/3_final_merged_data/speed-acc-ss-df.csv", 
+df <- read.csv("data/3_final_merged_data/speed-acc-ss-df.csv", 
                check.names=F, stringsAsFactors=F) 
 
 df %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
@@ -951,6 +953,33 @@ ggplot(aes(x=RT_bin_avg, y=mean, weight = n,
   #theme(text = element_text(size=30)) 
 ```
 
+
+### Logistic plot of accuracy over reaction time
+
+Not very informative
+```{r}
+ggplot(filter(df, age_code == "child", is.na(RT) == F),
+       aes(x = RT, y = correct)) +
+  geom_point() +
+  geom_smooth(method="glm", method.args=list(family="binomial"),
+              se=FALSE) +
+  facet_wrap(~stimuli)
+```
+
+### Scatterplot of accuracy vs. reaction time by subject
+```{r}
+subj_acc <- df %>%
+  filter(age_code == "child", is.na(RT) == F) %>%
+  group_by(stimuli, Sub.Num) %>%
+  summarize(accuracy = mean(correct), RT = mean(RT), num = n())
+
+ggplot(subj_acc, aes(x = RT, y = accuracy, weight = num)) +
+  geom_point(aes(size = num)) +
+  geom_smooth(method = "lm", formula = y ~ poly(x,2), se = FALSE) +
+  geom_hline(yintercept = 0.5, lty = "dashed") +
+  facet_wrap(~stimuli)
+  
+```
 
 ## MPT modeling
 

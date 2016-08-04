@@ -584,7 +584,9 @@ meandrift <- Facecut_drift %>%
   group_by(conditions) %>%
   summarise(avgdrift = mean(Drift))
 
-ggplot(meandrift, aes(y = avgdrift, x = conditions)) + geom_point()
+ggplot(meandrift, aes(y = avgdrift, x = conditions)) + geom_point() +
+  xlab("Cutoff RT (ms)") + ylab("Mean Drift") + 
+  theme(text = element_text(size=30))
 ```
 
 There's a huge drop off in mean when the data is cutoff at 800 ms, what's causing that?
@@ -593,7 +595,12 @@ Boxplots
 ```{r}
 Facecut_drift$conditions <- as.factor(Facecut_drift$conditions)
 
-ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(size = num)) + xlab("Cutoff Point")
+ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) +
+  geom_boxplot() + geom_jitter(width = .1, aes(size = num)) +
+  xlab("Cutoff RT (ms)") + ylab("Mean Drift") +
+  theme(text = element_text(size=30)) +
+  scale_y_continuous(limit = c(-5, 6)) +
+  geom_hline(aes(yintercept = 0), color = "red", linetype = 2)
 ```
 
 It looks like there are a few subjects whose mean drift rates drop (and a few whose drift rates jump) when their earlier trials are removed. With how drastic the change is in some cases, it looks like there just isn't enough data once these cuts are made to balance outliers.

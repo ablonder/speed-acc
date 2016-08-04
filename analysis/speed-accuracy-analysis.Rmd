@@ -1115,16 +1115,22 @@ ewma <- function(data){
       cutoff <- rt
   }
   
+  results <- mutate(results, stimuli = data$stimuli)
    return(list(cutoff = cutoff/1000, results = results))
 }
 
 
 # graph EWMA results
 ewma_graph = function(ewma_results){
-  plot <- ggplot(ewma_results, aes(rt)) +
+  results <- ewma_results[["results"]]
+  cutoffs <- ewma_results[["cutoffs"]]
+  plot <- ggplot(results, aes(rt)) +
      geom_line(aes(y = cs, color = "cs")) +
      geom_line(aes(y = ucl, color = "UCL")) +
-     geom_vline(aes(xintercept = cutoff), linetype = 2)
+    facet_wrap(~stimuli) +
+     geom_vline(data = cutoffs, aes(xintercept = cutoff), linetype = 2) +
+    ylab("Moving Average") + xlab("Reaction Time") +
+    theme(text = element_text(size = 20))
   
   return(plot)
 }
@@ -1161,6 +1167,16 @@ Face_ewma <- filter(ewma_data, stimuli == "Face")
  # Bullseye run separately
 Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
 Bullcut <- ewma(Bull_ewma)
+
+ewma_graphs <- rbind(ASLcut$results, Facecut$results, Objcut$results, Bullcut$results)
+cutoffs <- data.frame(rbind(c("ASL", ASLcut$cutoff*1000), c("Face", Facecut$cutoff*1000), c("Object", Objcut$cutoff*1000), c("Bullseye", Bullcut$cutoff*1000)))
+colnames(cutoffs) <- c("stimuli", "cutoff")
+cutoffs$stimuli <- as.factor(cutoffs$stimuli)
+cutoffs$cutoff <- as.numeric(as.character(cutoffs$cutoff))
+
+ewma_graphs <- list(results = ewma_graphs, cutoffs = cutoffs)
+
+ewma_graph(ewma_graphs)
 ```
 
 Average accuracy for all conditions past cutoff
@@ -1534,7 +1550,7 @@ ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions))
 
 ## Comparing accurate versus inaccurate ASL signers
 
-Load reaction time data
+Load eye movement data
 ```{r}
 idata <- read.csv("data/3_final_merged_data/speed-acc-cleaned-iChart.csv", check.names=F, stringsAsFactors=F)
 

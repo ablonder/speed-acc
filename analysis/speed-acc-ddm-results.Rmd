@@ -40,11 +40,14 @@ Reading in and minimal formatting of reaction time and accuracy data
 df <- read.csv("data/3_final_merged_data/speed-acc-ss-df.csv", 
                check.names=F, stringsAsFactors=F) 
 
-df %<>% mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
+df <- df %>%
+  mutate(stimuli = ifelse(stimuli == "V1" | stimuli == "V2", "ASL", 
                           ifelse(stimuli == "Trio", "Object", 
                                  ifelse(stimuli == "Bull", "Bullseye",
                                         stimuli))),
-         stimuli = factor(stimuli, levels = c("ASL", "Face", "Object", "Bullseye")))
+         stimuli = factor(stimuli, levels = c("ASL", "Face", "Object", "Bullseye"))) %>%
+  # just analyzing child data, only from participants who exhibited a shift
+  filter(age_code == "child", trial_type != "no_shift")
 ```
 
 # Off-the-shelf Drift Diffusion Model
@@ -58,22 +61,24 @@ The parameters of the drift drift diffusion model are:
 * $\delta$ = drift rate: speed of information processing (close to zero means ambiguous information)
 * $\tau$ = nondecision time: motor response time
 
-## Estimating parameters
+## DDM function
 
-Formatting the relevant data for Rwiener functions
+Functiont that formats data and fits the DDM to each participant using Rwiener function
 ```{r}
+
+ddm <- function(data, RTcutoff = .1){
 # columns need to be named "q" for RT and "resp" for response
-d <- df %>% 
-  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, RT_sec > .1) %>% 
-  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
-  mutate(resp = factor(correct),
-         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
-         resp = relevel(resp, "upper")) %>% 
-  rename(q = RT_sec)
-```
 
-```{r}
-sub.pars <- data.frame(Separation = numeric(),
+  d <- data %>% 
+    filter(is.na(RT_sec) == F, RT_sec > RTcutoff) %>% 
+    select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant,
+           Months) %>% 
+    mutate(resp = factor(correct),
+           resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
+           resp = relevel(resp, "upper")) %>% 
+    rename(q = RT_sec)
+
+  sub.pars <- data.frame(Separation = numeric(),
                        Non.Decision = numeric(),
                        Bias = numeric(),
                        Drift = numeric(),
@@ -83,59 +88,64 @@ sub.pars <- data.frame(Separation = numeric(),
                        Sub.Num = character(),
                        stringsAsFactors = F)
 
-
-#because RWiener is finicky:
-d$resp <- as.character(d$resp)
-```
-
-Fitting the Drift Diffusion Model for each participant
-```{r}
-conditions <- unique(as.character(d$stimuli))
-subs <- unique(as.character(d$Sub.Num))
-
-for (j in 1:length(subs)) {
-  sid <- as.character(subs[j]) 
-  dat <- as.data.frame(filter(d, Sub.Num == sid))
-  condition_type <- unique(as.character(dat$stimuli))
-  hearing_status <- unique(as.character(dat$hearing_status_participant))
-  age <- unique(as.character(dat$Months))
-  # fit ddm for each participant 
-  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
-               dat=select(dat, c(q, resp)), method="Nelder-Mead")
-  pars <- c(opt$par, condition_type, hearing_status, age, sid)
-  sub.pars[j,] <- pars
-} 
-```
-
-## Plotting Parameters
-
-This plot shows the mean parameter values & 95% C.I.s for each stimuli type
-```{r, fig.width=8, fig.height=6}
-sub.pars$Separation <- as.numeric(sub.pars$Separation)
-sub.pars$Non.Decision <- as.numeric(sub.pars$Non.Decision)
-sub.pars$Bias <- as.numeric(sub.pars$Bias)
-sub.pars$Drift <- as.numeric(sub.pars$Drift)
-sub.pars$Age.Months <- as.numeric(sub.pars$Age.Months)
-
-sub.pars <- sub.pars %>% 
+  #because RWiener is finicky:
+  d$resp <- as.character(d$resp)
+  
+  
+  # Fitting the Drift Diffusion Model for each participant
+  conditions <- unique(as.character(d$stimuli))
+  subs <- unique(as.character(d$Sub.Num))
+  trialcount <- group_by(d, Sub.Num) %>%
+      summarize(num = n())
+  
+  for (j in 1:length(subs)) {
+    sid <- as.character(subs[j]) 
+    dat <- as.data.frame(filter(d, Sub.Num == sid))
+    condition_type <- unique(as.character(dat$stimuli))
+    hearing_status <- unique(as.character(dat$hearing_status_participant))
+    age <- unique(as.character(dat$Months))
+    # fit ddm for each participant 
+    opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
+                 dat=select(dat, c(q, resp)), method="Nelder-Mead")
+    pars <- c(opt$par, condition_type, hearing_status, age, sid)
+    sub.pars[j,] <- pars
+  }
+  
+  
+  # cleans up parameters
+  sub.pars$Separation <- as.numeric(sub.pars$Separation)
+  sub.pars$Non.Decision <- as.numeric(sub.pars$Non.Decision)
+  sub.pars$Bias <- as.numeric(sub.pars$Bias)
+  sub.pars$Drift <- as.numeric(sub.pars$Drift)
+  sub.pars$Age.Months <- as.numeric(sub.pars$Age.Months)
+  
   # removes outliers
-  group_by(Condition) %>%
-  filter(Separation < mean(Separation) + 3 * sd(Separation), 
-         Separation > mean(Separation) - 3 * sd(Separation)) %>%
-  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision), 
-         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
-  filter(Bias < mean(Bias) + 3 * sd(Bias), 
-         Bias > mean(Bias) - 3 * sd(Bias)) %>%
-  filter(Drift < mean(Drift) + 3 * sd(Drift), 
-         Drift > mean(Drift) - 3 * sd(Drift)) %>%
-  ungroup() %>%
-  na.omit()
-
-sub.pars %<>% gather(Param, Value, Separation:Drift)
+  sub.pars <- sub.pars %>% 
+    group_by(Condition) %>%
+    filter(Separation < mean(Separation) + 3 * sd(Separation), 
+           Separation > mean(Separation) - 3 * sd(Separation)) %>%
+    filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision), 
+           Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
+    filter(Bias < mean(Bias) + 3 * sd(Bias), 
+           Bias > mean(Bias) - 3 * sd(Bias)) %>%
+    filter(Drift < mean(Drift) + 3 * sd(Drift), 
+           Drift > mean(Drift) - 3 * sd(Drift)) %>%
+    ungroup() %>%
+    na.omit()
+  
+  sub.pars %<>% gather(Param, Value, Separation:Drift)
+  sub.pars <- merge(sub.pars, trialcount, by = "Sub.Num")
+  
+  return(sub.pars)
+}
 ```
 
-Distributions of parameters across conditions
+## DDM Fit to All Child Participants
+
+Distributions of paramters across conditions
 ```{r}
+sub.pars <- ddm(df)
+
 ggplot(aes(x = Value, fill = Condition), 
        data = filter(sub.pars, Param %in% c("Drift", "Separation"))) +
   geom_density(alpha = 0.7, adjust = 1.5) + 
@@ -206,7 +216,7 @@ ewma <- function(data){
   cs <- .5 # control mean
   sigma <- .5 # control standard deviation
   L <- 1.5 # width of control limits
-  results <- data.frame(rt = integer(0), cs = integer(0), ucl = integer(0))
+  results <- data.frame(rt = integer(), cs = integer(), ucl = integer())
   for(row in 1:nrow(data)){
     subj <- data[row, ]
     acc <- as.integer(subj["correct"])
@@ -232,7 +242,8 @@ ewma_graph = function(ewma_results){
      geom_line(aes(y = results.cs, color = "cs")) +
      geom_line(aes(y = results.ucl, color = "UCL")) +
      geom_vline(aes(xintercept = cutoff), linetype = 2) +
-    ylab("Moving Average") + xlab("Reaction Time")
+    ylab("Moving Average") + xlab("Reaction Time") +
+    theme(text = element_text(size = 20))
   
   return(plot)
 }
@@ -243,9 +254,7 @@ ewma_graph = function(ewma_results){
 Running and visualizing the filter
 ```{r}
 # organize data for use
-ewma_data <- df %>% 
-  filter(age_code == "child", is.na(RT) == F) %>%
-  arrange(RT)
+ewma_data <- arrange(df, RT)
 # running the ewma
 overallcut <- ewma(ewma_data)
 
@@ -257,80 +266,11 @@ The dashed line where the weighted average (cs) crosses the threshold (UCL) is t
 
 ### The resulting paramters:
 
-Set up
+Parameter density
 ```{r}
-# columns need to be named "q" for RT and "resp" for response
-dfiltered_all <- df %>% 
-  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, RT >= overallcut['cutoff']) %>% 
-  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
-  mutate(resp = factor(correct),
-         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
-         resp = relevel(resp, "upper")) %>% 
-  rename(q = RT_sec)
-```
+cutoff <- as.numeric(overallcut['cutoff'])/1000
+filteredpars_all <- ddm(df, RTcutoff = cutoff)
 
-```{r}
-filteredpars_all <- data.frame(Separation = numeric(),
-                       Non.Decision = numeric(),
-                       Bias = numeric(),
-                       Drift = numeric(),
-                       Condition = character(),
-                       Hearing.Status = character(),
-                       Age.Months = character(),
-                       Sub.Num = character(),
-                       stringsAsFactors = F)
-
-
-#because RWiener is finicky:
-dfiltered_all$resp <- as.character(dfiltered_all$resp)
-```
-
-Parameter estimation
-```{r}
-conditions <- unique(as.character(dfiltered_all$stimuli))
-subs <- unique(as.character(dfiltered_all$Sub.Num))
-
-for (j in 1:length(subs)) {
-  sid <- as.character(subs[j]) 
-  dat <- as.data.frame(filter(dfiltered_all, Sub.Num == sid))
-  condition_type <- unique(as.character(dat$stimuli))
-  hearing_status <- unique(as.character(dat$hearing_status_participant))
-  age <- unique(as.character(dat$Months))
-  # fit ddm for each participant 
-  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
-               dat=select(dat, c(q, resp)), method="Nelder-Mead")
-  pars <- c(opt$par, condition_type, hearing_status, age, sid)
-  filteredpars_all[j,] <- pars
-} 
-```
-
-Density graph
-```{r, fig.width=8, fig.height=6}
-
-# formatting data
-filteredpars_all$Separation <- as.numeric(filteredpars_all$Separation)
-filteredpars_all$Non.Decision <- as.numeric(filteredpars_all$Non.Decision)
-filteredpars_all$Bias <- as.numeric(filteredpars_all$Bias)
-filteredpars_all$Drift <- as.numeric(filteredpars_all$Drift)
-filteredpars_all$Age.Months <- as.numeric(filteredpars_all$Age.Months)
-
-filteredpars_all <- filteredpars_all %>%
-  # remove outliers so that they don't have a huge impact
-  group_by(Condition) %>%
-  filter(Separation < mean(Separation) + 3 * sd(Separation),
-         Separation > mean(Separation) - 3 * sd(Separation)) %>%
-  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
-         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
-  filter(Bias < mean(Bias) + 3 * sd(Bias),
-         Bias > mean(Bias) - 3 * sd(Bias)) %>%
-  filter(Drift < mean(Drift) + 3 * sd(Drift),
-         Drift > mean(Drift) - 3 * sd(Drift)) %>%
-  ungroup() %>%
-  na.omit()
-
-filteredpars_all %<>% gather(Param, Value, Separation:Drift)
-
-# actual graph
 ggplot(aes(x = Value, fill = Condition), 
        data = filter(filteredpars_all, Param %in% c("Drift", "Separation"))) +
   geom_density(alpha = 0.7, adjust = 1.5) + 
@@ -353,9 +293,7 @@ This tells us pretty much the same thing as before. Mean drift is still higher i
 
 Running and visualizing the filter
 ```{r}
-ewma_data <- df %>% 
-  filter(age_code == "child", is.na(RT) == F) %>%
-  arrange(RT)
+ewma_data <- arrange(df, RT)
 
 # ASL
 ASL_ewma <- filter(ewma_data, stimuli == "ASL")
@@ -374,10 +312,14 @@ Bull_ewma <- filter(ewma_data, stimuli == "Bullseye")
 Bullcut <- ewma(Bull_ewma)
 
 # combined graph
-grid.arrange(ewma_graph(ASLcut) + labs(x = "", title = "ASL") + guides(colour = F),
-             ewma_graph(Facecut) + labs(x = "", y = "", title = "Face"),
-             ewma_graph(Objcut) + labs(title = "Object") + guides(colour = F),
-             ewma_graph(Bullcut) + labs(y = "", title = "Bullseye") + guides(colour = F),
+grid.arrange(ewma_graph(ASLcut) + labs(x = "", title = "ASL") +
+               guides(colour = F),
+             ewma_graph(Facecut) +
+               labs(x = "", y = "", title = "Face"),
+             ewma_graph(Objcut) + labs(title = "Object") +
+               guides(colour = F),
+             ewma_graph(Bullcut) + labs(y = "", title = "Bullseye") +
+               guides(colour = F),
              ncol = 2, nrow = 2)
 ```
 
@@ -387,80 +329,13 @@ Again, the dashed line represents the cutoff past which all responses are consid
 
 Since the EWMA cutoff for the Bullseye and Object conditions would eliminate all trials in those conditions, we will only run Drift Diffusion Models for the ASL and Face conditions based on their separate cutoffs.
 
-Set up:
-```{r}
-# columns need to be named "q" for RT and "resp" for response
-dfiltered_sep <- df %>% 
-  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, (stimuli == "ASL" & RT >= ASLcut['cutoff']) | (stimuli == "Face" & RT >= Facecut['cutoff'])) %>% 
-  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
-  mutate(resp = factor(correct),
-         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
-         resp = relevel(resp, "upper")) %>% 
-  rename(q = RT_sec)
-```
-
-```{r}
-filteredpars_sep <- data.frame(Separation = numeric(),
-                       Non.Decision = numeric(),
-                       Bias = numeric(),
-                       Drift = numeric(),
-                       Condition = character(),
-                       Hearing.Status = character(),
-                       Age.Months = character(),
-                       Sub.Num = character(),
-                       stringsAsFactors = F)
-
-
-#because RWiener is finicky:
-dfiltered_sep$resp <- as.character(dfiltered_sep$resp)
-```
-
-Parameter estimation
-```{r}
-conditions <- unique(as.character(dfiltered_sep$stimuli))
-subs <- unique(as.character(dfiltered_sep$Sub.Num))
-
-for (j in 1:length(subs)) {
-  sid <- as.character(subs[j]) 
-  dat <- as.data.frame(filter(dfiltered_sep, Sub.Num == sid))
-  condition_type <- unique(as.character(dat$stimuli))
-  hearing_status <- unique(as.character(dat$hearing_status_participant))
-  age <- unique(as.character(dat$Months))
-  # fit ddm for each participant 
-  opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
-               dat=select(dat, c(q, resp)), method="Nelder-Mead")
-  pars <- c(opt$par, condition_type, hearing_status, age, sid)
-  filteredpars_sep[j,] <- pars
-} 
-```
-
 Density graph
 ```{r, fig.width=8, fig.height=6}
+# columns need to be named "q" for RT and "resp" for response
+filteredpars_sep <- df %>% 
+  filter(is.na(RT_sec) == F, (stimuli == "ASL" & RT >= ASLcut['cutoff']) | (stimuli == "Face" & RT >= Facecut['cutoff'])) %>% 
+  ddm()
 
-# formatting data
-filteredpars_sep$Separation <- as.numeric(filteredpars_sep$Separation)
-filteredpars_sep$Non.Decision <- as.numeric(filteredpars_sep$Non.Decision)
-filteredpars_sep$Bias <- as.numeric(filteredpars_sep$Bias)
-filteredpars_sep$Drift <- as.numeric(filteredpars_sep$Drift)
-filteredpars_sep$Age.Months <- as.numeric(filteredpars_sep$Age.Months)
-
-filteredpars_sep <- filteredpars_sep %>%
-  # remove outliers so that they don't have a huge impact
-  group_by(Condition) %>%
-  filter(Separation < mean(Separation) + 3 * sd(Separation),
-         Separation > mean(Separation) - 3 * sd(Separation)) %>%
-  filter(Non.Decision < mean(Non.Decision) + 3 * sd(Non.Decision),
-         Non.Decision > mean(Non.Decision) - 3 * sd(Non.Decision)) %>%
-  filter(Bias < mean(Bias) + 3 * sd(Bias),
-         Bias > mean(Bias) - 3 * sd(Bias)) %>%
-  filter(Drift < mean(Drift) + 3 * sd(Drift),
-         Drift > mean(Drift) - 3 * sd(Drift)) %>%
-  ungroup() %>%
-  na.omit()
-
-filteredpars_sep %<>% gather(Param, Value, Separation:Drift)
-
-# actual graph
 ggplot(aes(x = Value, fill = Condition), 
        data = filter(filteredpars_sep, Param %in% c("Drift", "Separation"))) +
   geom_density(alpha = 0.7, adjust = 1.5) + 
@@ -484,16 +359,14 @@ The question going forward is why. Drift should go up when fast guesses are remo
 The average accuracy of subjects in the Face condition included in the Drift Diffusion Model after the EWMA cutoff is:
 ```{r}
 filteredavgs_Face <- df %>%
-  filter(age_code == "child", is.na(RT) == F,
-         stimuli == "Face", RT >= Facecut['cutoff']) %>%
+  filter(is.na(RT) == F, stimuli == "Face", RT >= Facecut['cutoff']) %>%
   summarize(avg = mean(correct, na.rm=T))
 print(filteredavgs_Face$avg)
 ```
 Not that much lower than the average accuracy of subjects in the ASL condition after the EWMA cutoff:
 ```{r}
 filteredavgs_ASL <- df %>%
-  filter(age_code == "child", is.na(RT) == F,
-         stimuli == "ASL", RT >= ASLcut['cutoff']) %>%
+  filter(is.na(RT) == F, stimuli == "ASL", RT >= ASLcut['cutoff']) %>%
   summarize(avg = mean(correct, na.rm=T))
 print(filteredavgs_ASL$avg)
 ```
@@ -507,43 +380,17 @@ ewma_graph(Facecut)
 
 The results from the different EWMA cutoffs indicate that mean drift rate varies quite a bit based on where the cutoff is. This function will enable us to run the DDM based on a range of cutoffs and compare the results.
 ```{r}
-driftcalc <- function(datalist, splits){
+driftcalc <- function(data, splits){
   drift_by_condition <- data.frame()
-  sub.pars <- data.frame(Separation = numeric(),
-                         Non.Decision = numeric(),
-                         Bias = numeric(),
-                         Drift = numeric(),
-                         Condition = character(),
-                         Hearing.Status = character(),
-                         Age.Months = character(),
-                         Sub.Num = character(),
-                         stringsAsFactors = F)
-  counter <- 0
-  for(data in datalist){
-    counter <- counter+1
-    thissub.pars <- sub.pars
-    conditions <- unique(as.character(data$stimuli))
-    subs <- unique(as.character(data$Sub.Num))
-    trialcount <- group_by(data, Sub.Num) %>%
-      summarize(num = n())
-    
-    for (j in 1:length(subs)) {
-      sid <- as.character(subs[j]) 
-      dat <- as.data.frame(filter(data, Sub.Num == sid))
-      condition_type <- unique(as.character(dat$stimuli))
-      hearing_status <- unique(as.character(dat$hearing_status_participant))
-      age <- unique(as.character(dat$Months))
-      # fit ddm for each participant 
-      opt <- optim(c(1, .1, .1, 1), wiener_deviance, 
-                   dat=select(dat, c(q, resp)), method="Nelder-Mead")
-      pars <- c(opt$par, condition_type, hearing_status, age, sid)
-      thissub.pars[j,] <- pars
-    }
-    
-    thissub.pars$Drift <- as.numeric(thissub.pars$Drift)
-    thissub.pars <- mutate(thissub.pars, conditions = as.numeric(splits[counter])) %>%
-      merge(trialcount, by = "Sub.Num")
-    drift_by_condition <- rbind(drift_by_condition, select(thissub.pars, Drift, conditions, Sub.Num, num))
+  for(cutoff in splits){
+    thissub.pars <- ddm(data, RTcutoff = cutoff) %>%
+      mutate(conditions = as.numeric(cutoff)) %>%
+      filter(Param == "Drift") %>%
+      rename(Drift = Value)
+  
+    drift_by_condition <- rbind(drift_by_condition,
+                                select(thissub.pars, Drift, conditions,
+                                       Sub.Num, num))
   }
   return(drift_by_condition)
 }
@@ -551,31 +398,13 @@ driftcalc <- function(datalist, splits){
 
 Calculating drift rates for each subject based on cutoffs every 100 ms from 200 ms to 1000 ms
 ```{r}
-Facedata <- df %>% 
-  filter(age_code == "child", trial_type != "no_shift", is.na(RT_sec) == F, stimuli == "Face") %>% 
-  select(Sub.Num, stimuli, RT_sec, correct, hearing_status_participant, Months) %>% 
-  mutate(resp = factor(correct),
-         resp = plyr::revalue(resp, c("0" = "lower", "1" = "upper")),
-         resp = relevel(resp, "upper")) %>% 
-  rename(q = RT_sec)
-
-#because RWiener is finicky:
-Facedata$resp <- as.character(Facedata$resp)
-
+# generate cutoffs
 startcuts <- .2
 endcuts <- 1
 interval <- .1
-cuts <- seq(startcuts, endcuts, interval)
-datalist <- list()
-cutoffs <- list()
-counter <- 0
-for(cutoff in cuts){
-  counter <- counter + 1
-  datalist[[counter]] <- filter(Facedata, q >= cutoff)
-  cutoffs[[counter]] <- cutoff
-}
 
-Facecut_drift <- driftcalc(datalist, cutoffs)
+Facecut_drift <- driftcalc(filter(df, stimuli == "Face"),
+                           seq(startcuts, endcuts, interval))
 ```
 
 Scatterplot of mean drift for each cutoff point
@@ -584,12 +413,13 @@ meandrift <- Facecut_drift %>%
   group_by(conditions) %>%
   summarise(avgdrift = mean(Drift))
 
-ggplot(meandrift, aes(y = avgdrift, x = conditions)) + geom_point() +
+ggplot(meandrift, aes(y = avgdrift, x = conditions)) +
+  geom_point(aes(size = 2.5)) +
   xlab("Cutoff RT (ms)") + ylab("Mean Drift") + 
-  theme(text = element_text(size=30))
+  theme(text = element_text(size=30), legend.position = "none")
 ```
 
-There's a huge drop off in mean when the data is cutoff at 800 ms, what's causing that?
+There's a huge drop off in mean when the data is cutoff at 900 ms, what's causing that?
 
 Boxplots
 ```{r}
@@ -603,6 +433,6 @@ ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions))
   geom_hline(aes(yintercept = 0), color = "red", linetype = 2)
 ```
 
-It looks like there are a few subjects whose mean drift rates drop (and a few whose drift rates jump) when their earlier trials are removed. With how drastic the change is in some cases, it looks like there just isn't enough data once these cuts are made to balance outliers.
+It looks like there are a few subjects whose mean drift rates drop when their earlier trials are removed. With how drastic the change is in some cases, it looks like there just isn't enough data once these cuts are made to balance outliers.
 
 We've learned what we can from what we have, going forward, it's time to collect more data.

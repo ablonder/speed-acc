@@ -58,7 +58,7 @@ ss_prop <- df %>%
   summarise(mean_correct = mean(correct))
 
 ss_prop <- df %>% 
-  group_by(Sub.Num, age_code, Months, language_modality, stimuli, correct, 
+  group_by(Sub.Num, age_code, Months, language_modality, stimuli, correct,
            hearing_status_participant) %>%
   filter(trial_type != "no_shift") %>% 
   summarise(mean_rt = mean(RT)) %>% 
@@ -201,11 +201,13 @@ However, this is not the clearest picture of the data, even when smoothed and we
 
 Plotted by Average Reaction Time in Each Quantile
 ```{r}
+nbreaks <- 10
+
 timeslices_avg <- df %>%
   filter(age_code == "child", is.na(RT_sec) == F) %>%
   group_by(stimuli) %>%
-  mutate(RT_binned = cut(RT_sec, breaks = 10),
-         RT_binned_q = lsr::quantileCut(RT_sec, 10)) %>%
+  mutate(RT_binned = cut(RT_sec, breaks = nbreaks),
+         RT_binned_q = lsr::quantileCut(RT_sec, nbreaks)) %>%
   group_by(stimuli, RT_binned_q) %>%
   mutate(RT_bin_avg = mean(RT, na.rm = T))
 count_avg <- timeslices_avg %>%

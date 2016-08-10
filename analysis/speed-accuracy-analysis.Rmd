@@ -1123,9 +1123,9 @@ ewma <- function(data){
 # graph EWMA results
 ewma_graph = function(ewma_results){
   results <- ewma_results[["results"]]
-  cutoffs <- ewma_results[["cutoffs"]]
+  cutoffs <- ewma_results[["cutoff"]]
   plot <- ggplot(results, aes(rt)) +
-     geom_line(aes(y = cs, color = "cs")) +
+     geom_point(aes(y = cs, color = "cs")) + geom_smooth(aes(y = cs)) +
      geom_line(aes(y = ucl, color = "UCL")) +
     facet_wrap(~stimuli) +
      geom_vline(data = cutoffs, aes(xintercept = cutoff), linetype = 2) +
@@ -1147,6 +1147,8 @@ ewma_data <- df %>%
 
 # all conditions run together
 overallcut <- ewma(ewma_data)
+
+ewma_graph(overallcut)
 
 # just Face and ASL run together
 ASLFace_ewma <- filter(ewma_data, stimuli == "ASL" || stimuli == "Face")
@@ -1174,7 +1176,7 @@ colnames(cutoffs) <- c("stimuli", "cutoff")
 cutoffs$stimuli <- as.factor(cutoffs$stimuli)
 cutoffs$cutoff <- as.numeric(as.character(cutoffs$cutoff))
 
-ewma_graphs <- list(results = ewma_graphs, cutoffs = cutoffs)
+ewma_graphs <- list(results = ewma_graphs, cutoff = cutoffs)
 
 ewma_graph(ewma_graphs)
 ```
@@ -1546,6 +1548,34 @@ Facecut_drift$Drift <- as.numeric(Facecut_drift$Drift)
 Facecut_drift$conditions <- as.factor(Facecut_drift$conditions)
 
 ggplot(data = Facecut_drift, aes(y = Drift, x = conditions, group = conditions)) + geom_boxplot() + geom_jitter(width = .1, aes(color = Sub.Num, size = n)) + xlab("Cutoff Point")
+```
+
+## Predictions for the Follow-up Experiment
+
+Bargraph of separation by condition - if Text is similar to Bullseye
+```{r}
+predict_saliency <- data.frame(rbind(c("Face", 1.65),
+                                     c("Bullseye", 1.27),
+                                     c("Text", (1.65+1.27)/2)))
+colnames(predict_saliency) <- (c("condition", "sep"))
+
+ggplot(predict_saliency, aes(x = condition, y = sep, fill = condition)) +
+  geom_bar(stat = "identity") + guides(fill = F) +
+  xlab("Condition") + ylab("Mean Boundary Separation") +
+  theme(text = element_text(size = 30))
+```
+
+Bargraph of separation by condition - if Text is similar to ASL
+```{r}
+predict_info <- data.frame(rbind(c("Face", 1.65),
+                                     c("Bullseye", 1.27),
+                                     c("Text", 1.98)))
+colnames(predict_info) <- (c("condition", "sep"))
+
+ggplot(predict_info, aes(x = condition, y = sep, fill = condition)) +
+  geom_bar(stat = "identity") + guides(fill = F) +
+  xlab("Condition") + ylab("Mean Boundary Separation") +
+  theme(text = element_text(size = 30))
 ```
 
 ## Comparing accurate versus inaccurate ASL signers

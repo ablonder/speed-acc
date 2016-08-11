@@ -1,0 +1,22 @@
+Package: ewma
+Title: Exponentially Weighted Moving Average Filter
+Version: 0.0.0.9000
+Authors@R: person("Aviva", "Blonder", email = "ablonder@oberlin.edu", role = c("aut", "cre"))
+Description: A statistical method for quality control that detects changes in
+    performance as reaction time increases to generate a cutoff reaction time past
+    which accuracy is above chance. Trials are sorted in order from fastest to
+    slowest reaction time, the EWMA statistic is computed iteratively for each trial
+    and compared to the upper control limit for that trial. If the EWMA statistic is
+    less than the upper control limit, then the accuracy for that trial is at chance
+    and it can be considered to be the result of a fast guess. However, if the
+    EWMA statistic is greater than the upper control limit, then the probability of
+    responding accurately can be concluded to be above chance for that reaction time
+    and all slower than it. From Vandekerckhove & Tuerlinckx 2007.
+Imports: dplyr
+Imports: ggplot2
+Depends:
+    R (>= 3.3.1)
+License: GNU General Public License
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 5.0.1.9000
